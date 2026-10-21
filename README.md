@@ -19,7 +19,7 @@ docker compose up --build
 ```
 
 The PostgreSQL database uses a named persistent volume. Uploaded files will use a separate persistent volume. The API publishes at <http://localhost:8080>; health is at `/health`, metadata at `/api/v1/meta`, and the OpenAPI document at `/openapi/v1.json`.
-Upload CSV through `POST /api/v1/imports` as multipart field `file`. The API responds with an import ID; use `GET /api/v1/imports/{id}` to poll durable progress and `GET /api/v1/imports` for history. The worker stages rows, validates row shape/fields/country membership, detects duplicates and within-file contradictions, compares against approved rows, promotes new values as versions, and creates pending conflicts for changed values. Use `GET /api/v1/imports/{id}/rows` to page through row-level results. Conflict decisions and UI remain upcoming.
+Upload CSV through `POST /api/v1/imports` as multipart field `file`. The API responds with an import ID; use `GET /api/v1/imports/{id}` to poll durable progress and `GET /api/v1/imports` for history. The worker stages rows, validates row shape/fields/country membership, detects duplicates and within-file contradictions, compares against approved rows, promotes new values as versions, and creates pending conflicts for changed values. Use `GET /api/v1/imports/{id}/rows` to page through row-level results. `GET /api/v1/conflicts` lists pending conflicts with current and proposed values and their file/user provenance. Submit `POST /api/v1/conflicts/{id}/decision` with `Accept` plus `proposalIndex`, or `Reject`, and an optional note. The first decision is audited and wins concurrent races. API v1 endpoints require `X-Demo-User` (`dana`, `omer`, or `lana`); this is assignment/demo authentication, not production identity.
 
 Set `ConnectionStrings__Meridian` to use another PostgreSQL server, including Azure Database for PostgreSQL. The app does not contain connection strings or credentials. Local uploads are configured with `Storage__LocalPath`; Azure Blob and Application Insights can be enabled through provider configuration in a later implementation step.
 
@@ -34,7 +34,7 @@ Database migrations are applied at startup and recorded in `schema_migrations`. 
 
 ## Current implementation status
 
-The initial infrastructure and asynchronous CSV upload/staging are implemented, and the .NET solution compiles with zero warnings. Row validation/classification and promotion, conflict review, snapshots, and the Angular client are still pending. PostgreSQL startup/integration verification is pending because Docker and a PostgreSQL server are unavailable in this machine session.
+The API/Worker foundation, durable CSV upload and staging, validation/classification, immutable promotion versions, pending conflict creation and human decisions with audit, demo-user attribution, and OpenAPI contracts are implemented. The .NET solution builds with zero warnings. Ranking/snapshots and the Angular client are still pending. PostgreSQL startup/integration verification is pending because Docker and a PostgreSQL server are unavailable in this machine session.
 
 ## Assignment material
 
@@ -50,5 +50,3 @@ dotnet run --project tests/Meridian.PostgresSmoke
 ```
 
 The smoke test connects to PostgreSQL, checks that migration and seed data are present, and verifies that PostgreSQL rejects overlapping membership periods. This test has not been run in the current environment because no PostgreSQL server or Docker CLI is available.
-
-

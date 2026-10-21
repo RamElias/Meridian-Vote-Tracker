@@ -9,7 +9,7 @@ public sealed record CreatedImport(Guid ImportId, string Status, Guid? OriginalI
 
 public sealed class ImportService(NpgsqlDataSource dataSource, string? configuredStoragePath)
 {
-    public async Task<CreatedImport> CreateAsync(string fileName, string correlationId, Stream source, CancellationToken cancellationToken)
+    public async Task<CreatedImport> CreateAsync(string fileName, string correlationId, string uploadedByUserId, Stream source, CancellationToken cancellationToken)
     {
         if (!string.Equals(Path.GetExtension(fileName), ".csv", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Only .csv files are accepted.");
@@ -39,7 +39,7 @@ public sealed class ImportService(NpgsqlDataSource dataSource, string? configure
             if (result is Guid id) originalId = id;
         }
         var status = originalId.HasValue ? "Duplicate" : "Queued";
-        await using (var insert = new NpgsqlCommand("INSERT INTO imports(id,file_name,content_sha256,file_path,status,original_import_id,report,completed_at) VALUES (@id,@name,@hash,@path,@status,@original,@report,@completed)", connection, transaction))
+        await using (var insert = new NpgsqlCommand("INSERT INTO imports(id,file_name,content_sha256,file_path,status,original_import_id,report,completed_at,uploaded_by_user_id) VALUES (@id,@name,@hash,@path,@status,@original,@report,@completed,@uploadedBy)", connection, transaction))
         {
             insert.Parameters.AddWithValue("id", importId);
             insert.Parameters.AddWithValue("name", safeName);
@@ -49,6 +49,7 @@ public sealed class ImportService(NpgsqlDataSource dataSource, string? configure
             insert.Parameters.AddWithValue("original", (object?)originalId ?? DBNull.Value);
             insert.Parameters.AddWithValue("report", originalId.HasValue ? NpgsqlDbType.Jsonb : NpgsqlDbType.Jsonb, originalId.HasValue ? JsonSerializer.Serialize(new { message = "Identical file content was already submitted; processing was skipped.", originalImportId = originalId }) : (object)DBNull.Value);
             insert.Parameters.AddWithValue("completed", originalId.HasValue ? DateTimeOffset.UtcNow : DBNull.Value);
+            insert.Parameters.AddWithValue("uploadedBy", uploadedByUserId);
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
         if (!originalId.HasValue)
@@ -65,12 +66,12 @@ public sealed class ImportService(NpgsqlDataSource dataSource, string? configure
 
     public async Task<IReadOnlyList<object>> ListAsync(CancellationToken cancellationToken)
     {
-        const string sql = "SELECT id,file_name,status,rows_processed,rows_total,created_at,completed_at,original_import_id FROM imports ORDER BY created_at DESC LIMIT 200";
+        const string sql = "SELECT i.id,i.file_name,i.status,i.rows_processed,i.rows_total,i.created_at,i.completed_at,i.original_import_id,u.display_name FROM imports i LEFT JOIN app_users u ON u.user_id=i.uploaded_by_user_id ORDER BY i.created_at DESC LIMIT 200";
         await using var command = dataSource.CreateCommand(sql);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var imports = new List<object>();
         while (await reader.ReadAsync(cancellationToken))
-            imports.Add(new { id = reader.GetGuid(0), fileName = reader.GetString(1), status = reader.GetString(2), rowsProcessed = reader.GetInt64(3), rowsTotal = reader.IsDBNull(4) ? (long?)null : reader.GetInt64(4), createdAt = reader.GetFieldValue<DateTimeOffset>(5), completedAt = reader.IsDBNull(6) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(6), originalImportId = reader.IsDBNull(7) ? (Guid?)null : reader.GetGuid(7) });
+            imports.Add(new { id = reader.GetGuid(0), fileName = reader.GetString(1), status = reader.GetString(2), rowsProcessed = reader.GetInt64(3), rowsTotal = reader.IsDBNull(4) ? (long?)null : reader.GetInt64(4), createdAt = reader.GetFieldValue<DateTimeOffset>(5), completedAt = reader.IsDBNull(6) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(6), originalImportId = reader.IsDBNull(7) ? (Guid?)null : reader.GetGuid(7), uploadedBy = reader.IsDBNull(8) ? null : reader.GetString(8) });
         return imports;
     }
 
@@ -90,18 +91,11 @@ public sealed class ImportService(NpgsqlDataSource dataSource, string? configure
     }
     public async Task<object?> GetAsync(Guid id, CancellationToken cancellationToken)
     {
-        const string sql = "SELECT id,file_name,status,rows_processed,rows_total,created_at,completed_at,original_import_id,report FROM imports WHERE id=@id";
+        const string sql = "SELECT i.id,i.file_name,i.status,i.rows_processed,i.rows_total,i.created_at,i.completed_at,i.original_import_id,i.report,u.display_name FROM imports i LEFT JOIN app_users u ON u.user_id=i.uploaded_by_user_id WHERE i.id=@id";
         await using var command = dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue("id", id);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
-        return new { id = reader.GetGuid(0), fileName = reader.GetString(1), status = reader.GetString(2), rowsProcessed = reader.GetInt64(3), rowsTotal = reader.IsDBNull(4) ? (long?)null : reader.GetInt64(4), createdAt = reader.GetFieldValue<DateTimeOffset>(5), completedAt = reader.IsDBNull(6) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(6), originalImportId = reader.IsDBNull(7) ? (Guid?)null : reader.GetGuid(7), report = reader.IsDBNull(8) ? (object?)null : reader.GetFieldValue<JsonDocument>(8).RootElement.Clone() };
+        return new { id = reader.GetGuid(0), fileName = reader.GetString(1), status = reader.GetString(2), rowsProcessed = reader.GetInt64(3), rowsTotal = reader.IsDBNull(4) ? (long?)null : reader.GetInt64(4), createdAt = reader.GetFieldValue<DateTimeOffset>(5), completedAt = reader.IsDBNull(6) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(6), originalImportId = reader.IsDBNull(7) ? (Guid?)null : reader.GetGuid(7), report = reader.IsDBNull(8) ? (object?)null : reader.GetFieldValue<JsonDocument>(8).RootElement.Clone(), uploadedBy = reader.IsDBNull(9) ? null : reader.GetString(9) };
     }
 }
-
-
-
-
-
-
-

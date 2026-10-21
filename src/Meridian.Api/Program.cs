@@ -7,6 +7,8 @@ var connectionString = builder.Configuration.GetConnectionString("Meridian")
     ?? throw new InvalidOperationException("ConnectionStrings:Meridian is required.");
 builder.Services.AddSingleton<NpgsqlDataSource>(_ => NpgsqlDataSource.Create(connectionString));
 builder.Services.AddSingleton<CsvImportValidator>();
+builder.Services.AddSingleton<DemoUserService>();
+builder.Services.AddSingleton<ConflictService>();
 builder.Services.AddSingleton<ImportService>(provider => new ImportService(provider.GetRequiredService<NpgsqlDataSource>(), builder.Configuration["Storage:LocalPath"]));
 builder.Services.AddSingleton<DatabaseBootstrapper>(provider => new DatabaseBootstrapper(connectionString, provider.GetRequiredService<ILogger<DatabaseBootstrapper>>()));
 builder.Services.AddProblemDetails();
@@ -21,6 +23,26 @@ app.Use(async (context, next) =>
         await next();
 });
 app.UseExceptionHandler();
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/api/v1") && !context.Request.Path.Equals("/api/v1/meta", StringComparison.OrdinalIgnoreCase))
+    {
+        var userId = context.Request.Headers["X-Demo-User"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            await Results.Problem(title: "Authentication required", detail: "Choose a seeded demo user in X-Demo-User.", statusCode: StatusCodes.Status401Unauthorized).ExecuteAsync(context);
+            return;
+        }
+        var user = await context.RequestServices.GetRequiredService<DemoUserService>().FindAsync(userId, context.RequestAborted);
+        if (user is null)
+        {
+            await Results.Problem(title: "Unknown demo user", detail: "Use one of the seeded demo user IDs: dana, omer, or lana.", statusCode: StatusCodes.Status401Unauthorized).ExecuteAsync(context);
+            return;
+        }
+        context.Items["DemoUser"] = user;
+    }
+    await next();
+});
 app.MapGet("/health", () => Results.Ok(new { status = "ok" })).WithName("Health");
 app.MapGet("/api/v1/meta", () => Results.Ok(new { name = "Meridian Vote Tracker", version = "v1" })).WithName("GetMetadata");
 app.MapGet("/openapi/v1.json", async (CancellationToken ct) => Results.Text(await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "openapi.json"), ct), "application/json"));
@@ -33,7 +55,7 @@ app.MapPost("/api/v1/imports", async (HttpRequest request, ImportService imports
     try
     {
         await using var stream = file.OpenReadStream();
-        var result = await imports.CreateAsync(file.FileName, request.HttpContext.TraceIdentifier, stream, ct);
+        var result = await imports.CreateAsync(file.FileName, request.HttpContext.TraceIdentifier, ((DemoUser)request.HttpContext.Items["DemoUser"]!).UserId, stream, ct);
         var location = $"/api/v1/imports/{result.ImportId}";
         return result.Status == "Duplicate" ? Results.Ok(result) : Results.Accepted(location, result);
     }
@@ -48,18 +70,23 @@ app.MapGet("/api/v1/imports/{id:guid}/rows", async (Guid id, long? after, int? l
     var pageSize = Math.Clamp(limit ?? 200, 1, 500);
     var rows = await imports.ListRowsAsync(id, Math.Max(0, after ?? 0), pageSize, classification, ct);
     return Results.Ok(rows);
-}).WithName("ListImportRows");app.MapGet("/api/v1/imports/{id:guid}", async (Guid id, ImportService imports, CancellationToken ct) =>
+}).WithName("ListImportRows");
+app.MapGet("/api/v1/imports/{id:guid}", async (Guid id, ImportService imports, CancellationToken ct) =>
 {
     var result = await imports.GetAsync(id, ct);
     return result is null ? Results.Problem(title: "Import not found", statusCode: StatusCodes.Status404NotFound) : Results.Ok(result);
 }).WithName("GetImport");
+app.MapGet("/api/v1/conflicts", async (string? voteId, ConflictService conflicts, CancellationToken ct) => Results.Ok(await conflicts.ListPendingAsync(voteId, ct))).WithName("ListPendingConflicts");
+app.MapPost("/api/v1/conflicts/{id:guid}/decision", async (Guid id, ConflictDecision decision, HttpContext context, ConflictService conflicts, CancellationToken ct) =>
+{
+    var user = (DemoUser)context.Items["DemoUser"]!;
+    var result = await conflicts.DecideAsync(id, decision, user.UserId, context.TraceIdentifier, ct);
+    if (result.Applied) return Results.Ok(new { id, status = decision.Action.Equals("Accept", StringComparison.OrdinalIgnoreCase) ? "Accepted" : "Rejected" });
+    var changed = result.Message?.StartsWith("The conflict was already resolved", StringComparison.Ordinal) == true || result.Message?.StartsWith("The conflict changed", StringComparison.Ordinal) == true;
+    return Results.Problem(title: changed ? "Conflict already resolved" : "Invalid decision", detail: result.Message, statusCode: changed ? StatusCodes.Status409Conflict : StatusCodes.Status400BadRequest);
+}).WithName("DecideConflict");
 var seedPath = builder.Configuration["Seed:MemberStatesPath"];
 await app.Services.GetRequiredService<DatabaseBootstrapper>().InitializeAsync(seedPath, app.Lifetime.ApplicationStopping);
 app.Run();
 
 public partial class Program { }
-
-
-
-
-

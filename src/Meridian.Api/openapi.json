@@ -32,7 +32,12 @@
           "200": {
             "description": "Recent imports and durable progress"
           }
-        }
+        },
+        "security": [
+          {
+            "DemoUser": []
+          }
+        ]
       },
       "post": {
         "operationId": "CreateImport",
@@ -65,7 +70,12 @@
           "400": {
             "description": "Invalid request"
           }
-        }
+        },
+        "security": [
+          {
+            "DemoUser": []
+          }
+        ]
       }
     },
     "/api/v1/imports/{id}": {
@@ -89,7 +99,12 @@
           "404": {
             "description": "Import was not found"
           }
-        }
+        },
+        "security": [
+          {
+            "DemoUser": []
+          }
+        ]
       }
     },
     "/api/v1/imports/{id}/rows": {
@@ -137,7 +152,114 @@
           "200": {
             "description": "A page of staged row classifications and original values"
           }
-        }
+        },
+        "security": [
+          {
+            "DemoUser": []
+          }
+        ]
+      }
+    },
+    "/api/v1/conflicts": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "name": "voteId"
+          }
+        ],
+        "security": [
+          {
+            "DemoUser": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Open conflicts with current values and source proposals"
+          },
+          "401": {
+            "description": "Demo user header is missing or unknown"
+          }
+        },
+        "operationId": "ListPendingConflicts"
+      }
+    },
+    "/api/v1/conflicts/{id}/decision": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "name": "id"
+          }
+        ],
+        "security": [
+          {
+            "DemoUser": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "enum": [
+                      "Accept",
+                      "Reject"
+                    ],
+                    "type": "string"
+                  },
+                  "proposalIndex": {
+                    "nullable": true,
+                    "type": "integer"
+                  },
+                  "note": {
+                    "nullable": true,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "action"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "401": {
+            "description": "Demo user header is missing or unknown"
+          },
+          "409": {
+            "description": "Conflict has already changed or been resolved"
+          },
+          "200": {
+            "description": "Decision applied and audited"
+          },
+          "400": {
+            "description": "Invalid decision"
+          }
+        },
+        "operationId": "DecideConflict"
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "DemoUser": {
+        "type": "apiKey",
+        "name": "X-Demo-User",
+        "in": "header"
       }
     }
   }
