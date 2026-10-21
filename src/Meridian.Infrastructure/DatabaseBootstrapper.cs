@@ -15,20 +15,24 @@ public sealed class DatabaseBootstrapper(string connectionString, ILogger<Databa
         {
             await using (var command = new NpgsqlCommand("CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())", connection))
                 await command.ExecuteNonQueryAsync(cancellationToken);
-            var migrationPath = Path.Combine(AppContext.BaseDirectory, "Migrations", "001_initial.sql");
-            var sql = await File.ReadAllTextAsync(migrationPath, cancellationToken);
-            await using (var command = new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = '001_initial')", connection))
+            var migrationDirectory = Path.Combine(AppContext.BaseDirectory, "Migrations");
+            foreach (var migrationPath in Directory.GetFiles(migrationDirectory, "*.sql").Order(StringComparer.Ordinal))
             {
-                if (!((bool)(await command.ExecuteScalarAsync(cancellationToken) ?? false)))
-                {
-                    await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-                    await using var migration = new NpgsqlCommand(sql, connection, transaction);
+                var version = Path.GetFileNameWithoutExtension(migrationPath);
+                await using var check = new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=@version)", connection);
+                check.Parameters.AddWithValue("version", version);
+                if ((bool)(await check.ExecuteScalarAsync(cancellationToken) ?? false)) continue;
+                var sql = await File.ReadAllTextAsync(migrationPath, cancellationToken);
+                await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+                await using (var migration = new NpgsqlCommand(sql, connection, transaction))
                     await migration.ExecuteNonQueryAsync(cancellationToken);
-                    await using var record = new NpgsqlCommand("INSERT INTO schema_migrations(version) VALUES ('001_initial')", connection, transaction);
+                await using (var record = new NpgsqlCommand("INSERT INTO schema_migrations(version) VALUES (@version)", connection, transaction))
+                {
+                    record.Parameters.AddWithValue("version", version);
                     await record.ExecuteNonQueryAsync(cancellationToken);
-                    await transaction.CommitAsync(cancellationToken);
-                    logger.LogInformation("Applied database migration {Migration}", "001_initial");
                 }
+                await transaction.CommitAsync(cancellationToken);
+                logger.LogInformation("Applied database migration {Migration}", version);
             }
             if (!string.IsNullOrWhiteSpace(seedFile) && File.Exists(seedFile))
                 await SeedMembershipsAsync(connection, seedFile, cancellationToken);
@@ -89,5 +93,4 @@ public sealed class DatabaseBootstrapper(string connectionString, ILogger<Databa
         return fields;
     }
 }
-
 

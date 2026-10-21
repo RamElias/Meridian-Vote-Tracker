@@ -110,6 +110,8 @@
 
 ### שלב 1 — תשתית וקליטה ראשונה
 
+**מצב נוכחי:** שלד API/Worker, migrations, seed, OpenAPI והעלאת CSV ל־staging עם התקדמות נשמרת קיימים. עדיין חסרים בדיקות תקינות וסיווגים, קידום נתונים, והרצת Compose מול PostgreSQL.
+
 Compose עם API, Worker ו־PostgreSQL; migrations; טעינת `member_states.csv`; חוזה OpenAPI; העלאת CSV; שמירת מקור; Worker, polling ו־staging.
 
 **מוכן כאשר:** `docker compose up` מעלה את המערכת; בסיס המדינות נטען בבטחה; העלאה מחזירה מזהה; אפשר לרענן ולראות התקדמות ודוח.
