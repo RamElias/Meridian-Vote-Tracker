@@ -6,6 +6,7 @@ var connectionString = builder.Configuration.GetConnectionString("Meridian")
     ?? throw new InvalidOperationException("ConnectionStrings:Meridian is required.");
 builder.Services.AddSingleton<NpgsqlDataSource>(_ => NpgsqlDataSource.Create(connectionString));
 builder.Services.AddSingleton(provider => new DatabaseBootstrapper(connectionString, provider.GetRequiredService<ILogger<DatabaseBootstrapper>>()));
+builder.Services.AddSingleton<CsvImportValidator>();
 builder.Services.AddSingleton<CsvImportJobProcessor>();
 builder.Services.AddHostedService<Worker>();
 var host = builder.Build();
@@ -24,4 +25,5 @@ public sealed class Worker(ILogger<Worker> logger, DatabaseBootstrapper database
         }
     }
 }
+
 

@@ -1,6 +1,6 @@
 # Meridian Vote Tracker — Decisions
 
-**Status:** Core domain decisions agreed; API/Worker foundation, PostgreSQL migrations/seed, and asynchronous CSV staging implemented. This file summarizes the choices relevant to the assignment.
+**Status:** Core domain decisions agreed; API/Worker foundation, PostgreSQL migrations/seed, asynchronous CSV validation/staging, initial version promotion, and pending conflict persistence implemented. This file summarizes the choices relevant to the assignment.
 
 ## Architecture and data
 
@@ -26,4 +26,5 @@
 ## Scope and trade-offs
 
 Authentication is simplified for the assignment; API authorization remains required for roles. Production would add real identity, managed identity/Key Vault, deployment, backup/restore, security and load reviews, and retention policies. Before parallel development, agree on API contracts, generated client, formatting/analyzers, migration ownership, error format, UTC timestamps, tests, and review practices, then divide work into import, review/positions, Angular, and ranking/operations.
+
 

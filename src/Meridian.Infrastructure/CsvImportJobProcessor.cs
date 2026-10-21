@@ -5,26 +5,29 @@ using NpgsqlTypes;
 
 namespace Meridian.Infrastructure;
 
-public sealed class CsvImportJobProcessor(NpgsqlDataSource dataSource, ILogger<CsvImportJobProcessor> logger)
+public sealed class CsvImportJobProcessor(NpgsqlDataSource dataSource, CsvImportValidator validator, ILogger<CsvImportJobProcessor> logger)
 {
+    private readonly record struct ClaimedJob(Guid JobId, Guid ImportId, string CorrelationId);
     private static readonly string[] RequiredHeaders = ["assembly_vote_id", "session", "vote_date", "resolution_title", "country_code", "country_name", "ballot", "published_at"];
 
     public async Task<bool> ProcessNextAsync(CancellationToken cancellationToken)
     {
         var job = await ClaimAsync(cancellationToken);
         if (job is null) return false;
+        using var logScope = logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = job.Value.CorrelationId });
         try
         {
             var import = await GetImportFileAsync(job.Value.ImportId, cancellationToken);
             var totalRows = await CountRowsAsync(import.Path, cancellationToken);
             await SetTotalAsync(job.Value.JobId, job.Value.ImportId, totalRows, cancellationToken);
             var stagedRows = await StageAsync(job.Value.JobId, job.Value.ImportId, import.Path, cancellationToken);
+            using var report = await validator.ValidateAndPromoteAsync(job.Value.ImportId, cancellationToken);
             await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-            await using (var updateImport = new NpgsqlCommand("UPDATE imports SET status='Staged',rows_total=@count,rows_processed=@count,report=@report,completed_at=now() WHERE id=@id", connection, transaction))
+            await using (var updateImport = new NpgsqlCommand("UPDATE imports SET status='Completed',rows_total=@count,rows_processed=@count,report=@report,completed_at=now() WHERE id=@id", connection, transaction))
             {
                 updateImport.Parameters.AddWithValue("count", stagedRows);
-                updateImport.Parameters.AddWithValue("report", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(new { stagedRows, classificationsPending = true }));
+                updateImport.Parameters.AddWithValue("report", NpgsqlDbType.Jsonb, report.RootElement.GetRawText());
                 updateImport.Parameters.AddWithValue("id", job.Value.ImportId);
                 await updateImport.ExecuteNonQueryAsync(cancellationToken);
             }
@@ -45,18 +48,20 @@ public sealed class CsvImportJobProcessor(NpgsqlDataSource dataSource, ILogger<C
         return true;
     }
 
-    private async Task<(Guid JobId, Guid ImportId)?> ClaimAsync(CancellationToken cancellationToken)
+    private async Task<ClaimedJob?> ClaimAsync(CancellationToken cancellationToken)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         Guid jobId;
         Guid importId;
-        await using (var claim = new NpgsqlCommand("SELECT id,(payload->>'importId')::uuid FROM background_jobs WHERE job_type='csv_import' AND status='Queued' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1", connection, transaction))
+        string correlationId;
+        await using (var claim = new NpgsqlCommand("SELECT id,(payload->>'importId')::uuid,COALESCE(payload->>'correlationId','') FROM background_jobs WHERE job_type='csv_import' AND status='Queued' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1", connection, transaction))
         await using (var reader = await claim.ExecuteReaderAsync(cancellationToken))
         {
             if (!await reader.ReadAsync(cancellationToken)) return null;
             jobId = reader.GetGuid(0);
             importId = reader.GetGuid(1);
+            correlationId = reader.GetString(2);
         }
         await using (var updateJob = new NpgsqlCommand("UPDATE background_jobs SET status='Running',started_at=now() WHERE id=@id", connection, transaction))
         {
@@ -69,7 +74,7 @@ public sealed class CsvImportJobProcessor(NpgsqlDataSource dataSource, ILogger<C
             await updateImport.ExecuteNonQueryAsync(cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);
-        return (jobId, importId);
+        return new ClaimedJob(jobId, importId, correlationId);
     }
 
     private async Task<(string Path, string FileName)> GetImportFileAsync(Guid importId, CancellationToken cancellationToken)
@@ -196,6 +201,12 @@ public sealed class CsvImportJobProcessor(NpgsqlDataSource dataSource, ILogger<C
         await transaction.CommitAsync(cancellationToken);
     }
 }
+
+
+
+
+
+
 
 
 

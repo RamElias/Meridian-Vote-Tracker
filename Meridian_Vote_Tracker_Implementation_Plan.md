@@ -110,7 +110,7 @@
 
 ### שלב 1 — תשתית וקליטה ראשונה
 
-**מצב נוכחי:** שלד API/Worker, migrations, seed, OpenAPI והעלאת CSV ל־staging עם התקדמות נשמרת קיימים. עדיין חסרים בדיקות תקינות וסיווגים, קידום נתונים, והרצת Compose מול PostgreSQL.
+**מצב נוכחי:** שלד API/Worker, migrations, seed, OpenAPI והעלאת CSV ל־staging עם התקדמות נשמרת קיימים. בדיקות תקינות, סיווגים וקידום ראשוני קיימים; עדיין חסרים מימוש החלטות קונפליקט, הרצת Compose ובדיקת PostgreSQL בפועל.
 
 Compose עם API, Worker ו־PostgreSQL; migrations; טעינת `member_states.csv`; חוזה OpenAPI; העלאת CSV; שמירת מקור; Worker, polling ו־staging.
 
@@ -148,4 +148,5 @@ Compose עם API, Worker ו־PostgreSQL; migrations; טעינת `member_states.c
 ---
 
 מסמך זה מרכז החלטות תכנון מתוך השיחה וממפה אותן לדרישות המטלה. כל שינוי שיידרש בעקבות בדיקת קובצי הנתונים או מגבלת זמן יירשם ב־DECISIONS.md ויקבל נימוק.
+
 

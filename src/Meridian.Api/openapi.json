@@ -1,20 +1,144 @@
 {
   "openapi": "3.0.1",
-  "info": { "title": "Meridian Vote Tracker API", "version": "v1" },
+  "info": {
+    "title": "Meridian Vote Tracker API",
+    "version": "v1"
+  },
   "paths": {
-    "/health": { "get": { "operationId": "Health", "responses": { "200": { "description": "Service is healthy" } } } },
-    "/api/v1/meta": { "get": { "operationId": "GetMetadata", "responses": { "200": { "description": "API metadata" } } } },
+    "/health": {
+      "get": {
+        "operationId": "Health",
+        "responses": {
+          "200": {
+            "description": "Service is healthy"
+          }
+        }
+      }
+    },
+    "/api/v1/meta": {
+      "get": {
+        "operationId": "GetMetadata",
+        "responses": {
+          "200": {
+            "description": "API metadata"
+          }
+        }
+      }
+    },
     "/api/v1/imports": {
-      "get": { "operationId": "ListImports", "responses": { "200": { "description": "Recent imports and durable progress" } } },
+      "get": {
+        "operationId": "ListImports",
+        "responses": {
+          "200": {
+            "description": "Recent imports and durable progress"
+          }
+        }
+      },
       "post": {
         "operationId": "CreateImport",
-        "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": { "type": "object", "required": ["file"], "properties": { "file": { "type": "string", "format": "binary" } } } } } },
-        "responses": { "202": { "description": "Import queued" }, "200": { "description": "Identical file was already received" }, "400": { "description": "Invalid request" } }
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Import queued"
+          },
+          "200": {
+            "description": "Identical file was already received"
+          },
+          "400": {
+            "description": "Invalid request"
+          }
+        }
       }
     },
     "/api/v1/imports/{id}": {
-      "get": { "operationId": "GetImport", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }], "responses": { "200": { "description": "Import status and report" }, "404": { "description": "Import was not found" } } }
+      "get": {
+        "operationId": "GetImport",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Import status and report"
+          },
+          "404": {
+            "description": "Import was not found"
+          }
+        }
+      }
+    },
+    "/api/v1/imports/{id}/rows": {
+      "get": {
+        "operationId": "ListImportRows",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "classification",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of staged row classifications and original values"
+          }
+        }
+      }
     }
   }
 }
-

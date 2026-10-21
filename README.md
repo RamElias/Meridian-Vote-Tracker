@@ -19,7 +19,7 @@ docker compose up --build
 ```
 
 The PostgreSQL database uses a named persistent volume. Uploaded files will use a separate persistent volume. The API publishes at <http://localhost:8080>; health is at `/health`, metadata at `/api/v1/meta`, and the OpenAPI document at `/openapi/v1.json`.
-Upload CSV through `POST /api/v1/imports` as multipart field `file`. The API responds with an import ID; use `GET /api/v1/imports/{id}` to poll durable progress and `GET /api/v1/imports` for history. The current worker stages rows and leaves the import in `Staged`; validation, classification, and promotion are the next implementation step.
+Upload CSV through `POST /api/v1/imports` as multipart field `file`. The API responds with an import ID; use `GET /api/v1/imports/{id}` to poll durable progress and `GET /api/v1/imports` for history. The worker stages rows, validates row shape/fields/country membership, detects duplicates and within-file contradictions, compares against approved rows, promotes new values as versions, and creates pending conflicts for changed values. Use `GET /api/v1/imports/{id}/rows` to page through row-level results. Conflict decisions and UI remain upcoming.
 
 Set `ConnectionStrings__Meridian` to use another PostgreSQL server, including Azure Database for PostgreSQL. The app does not contain connection strings or credentials. Local uploads are configured with `Storage__LocalPath`; Azure Blob and Application Insights can be enabled through provider configuration in a later implementation step.
 
@@ -50,4 +50,5 @@ dotnet run --project tests/Meridian.PostgresSmoke
 ```
 
 The smoke test connects to PostgreSQL, checks that migration and seed data are present, and verifies that PostgreSQL rejects overlapping membership periods. This test has not been run in the current environment because no PostgreSQL server or Docker CLI is available.
+
 

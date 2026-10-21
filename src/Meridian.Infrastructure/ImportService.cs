@@ -9,7 +9,7 @@ public sealed record CreatedImport(Guid ImportId, string Status, Guid? OriginalI
 
 public sealed class ImportService(NpgsqlDataSource dataSource, string? configuredStoragePath)
 {
-    public async Task<CreatedImport> CreateAsync(string fileName, Stream source, CancellationToken cancellationToken)
+    public async Task<CreatedImport> CreateAsync(string fileName, string correlationId, Stream source, CancellationToken cancellationToken)
     {
         if (!string.Equals(Path.GetExtension(fileName), ".csv", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Only .csv files are accepted.");
@@ -32,7 +32,7 @@ public sealed class ImportService(NpgsqlDataSource dataSource, string? configure
             await advisoryLock.ExecuteNonQueryAsync(cancellationToken);
         }
         Guid? originalId = null;
-        await using (var find = new NpgsqlCommand("SELECT id FROM imports WHERE content_sha256=@hash ORDER BY created_at LIMIT 1", connection, transaction))
+        await using (var find = new NpgsqlCommand("SELECT id FROM imports WHERE content_sha256=@hash AND status IN ('Queued','Running','Staged','Completed','Duplicate') ORDER BY created_at LIMIT 1", connection, transaction))
         {
             find.Parameters.AddWithValue("hash", hash);
             var result = await find.ExecuteScalarAsync(cancellationToken);
@@ -53,9 +53,10 @@ public sealed class ImportService(NpgsqlDataSource dataSource, string? configure
         }
         if (!originalId.HasValue)
         {
-            await using var job = new NpgsqlCommand("INSERT INTO background_jobs(id,job_type,status,payload) VALUES (@id,'csv_import','Queued',jsonb_build_object('importId',@importId))", connection, transaction);
+            await using var job = new NpgsqlCommand("INSERT INTO background_jobs(id,job_type,status,payload) VALUES (@id,'csv_import','Queued',jsonb_build_object('importId',@importId,'correlationId',@correlationId))", connection, transaction);
             job.Parameters.AddWithValue("id", Guid.NewGuid());
             job.Parameters.AddWithValue("importId", importId.ToString());
+            job.Parameters.AddWithValue("correlationId", correlationId);
             await job.ExecuteNonQueryAsync(cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);
@@ -73,6 +74,20 @@ public sealed class ImportService(NpgsqlDataSource dataSource, string? configure
         return imports;
     }
 
+    public async Task<IReadOnlyList<object>> ListRowsAsync(Guid id, long afterRow, int limit, string? classification, CancellationToken cancellationToken)
+    {
+        const string sql = "SELECT row_number,classification,reason,raw_values FROM import_staging_rows WHERE import_id=@id AND row_number>@after AND (@classification IS NULL OR classification=@classification) ORDER BY row_number LIMIT @limit";
+        await using var command = dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue("id", id);
+        command.Parameters.AddWithValue("after", afterRow);
+        command.Parameters.AddWithValue("classification", (object?)classification ?? DBNull.Value);
+        command.Parameters.AddWithValue("limit", limit);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var rows = new List<object>();
+        while (await reader.ReadAsync(cancellationToken))
+            rows.Add(new { rowNumber = reader.GetInt64(0), classification = reader.IsDBNull(1) ? null : reader.GetString(1), reason = reader.IsDBNull(2) ? null : reader.GetString(2), values = reader.GetFieldValue<JsonDocument>(3).RootElement.Clone() });
+        return rows;
+    }
     public async Task<object?> GetAsync(Guid id, CancellationToken cancellationToken)
     {
         const string sql = "SELECT id,file_name,status,rows_processed,rows_total,created_at,completed_at,original_import_id,report FROM imports WHERE id=@id";
@@ -83,6 +98,9 @@ public sealed class ImportService(NpgsqlDataSource dataSource, string? configure
         return new { id = reader.GetGuid(0), fileName = reader.GetString(1), status = reader.GetString(2), rowsProcessed = reader.GetInt64(3), rowsTotal = reader.IsDBNull(4) ? (long?)null : reader.GetInt64(4), createdAt = reader.GetFieldValue<DateTimeOffset>(5), completedAt = reader.IsDBNull(6) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(6), originalImportId = reader.IsDBNull(7) ? (Guid?)null : reader.GetGuid(7), report = reader.IsDBNull(8) ? (object?)null : reader.GetFieldValue<JsonDocument>(8).RootElement.Clone() };
     }
 }
+
+
+
 
 
 
