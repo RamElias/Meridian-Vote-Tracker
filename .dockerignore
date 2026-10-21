@@ -1,0 +1,6 @@
+.tools/
+.git/
+.env
+**/bin/
+**/obj/
+data/uploads/

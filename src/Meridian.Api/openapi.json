@@ -1,0 +1,12 @@
+{
+  "openapi": "3.0.1",
+  "info": { "title": "Meridian Vote Tracker API", "version": "v1" },
+  "paths": {
+    "/health": {
+      "get": { "operationId": "Health", "responses": { "200": { "description": "Service is healthy" } } }
+    },
+    "/api/v1/meta": {
+      "get": { "operationId": "GetMetadata", "responses": { "200": { "description": "API metadata" } } }
+    }
+  }
+}

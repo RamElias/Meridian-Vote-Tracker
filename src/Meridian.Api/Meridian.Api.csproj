@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup><AssemblyName>Meridian.Api</AssemblyName><UserSecretsId>meridian-vote-tracker-api</UserSecretsId></PropertyGroup>
+  <ItemGroup>
+    <None Update="openapi.json" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="..\Meridian.Infrastructure\Meridian.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

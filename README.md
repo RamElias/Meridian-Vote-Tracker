@@ -1,0 +1,51 @@
+# Meridian Vote Tracker
+
+An ASP.NET Core 8, PostgreSQL, Angular and Docker Compose implementation of the Meridian Vote Tracker assignment. The current foundation starts the API and background Worker as separate processes, applies versioned PostgreSQL SQL migrations, and seeds member states and membership periods from the supplied CSV.
+
+## Prerequisites
+
+- Docker Desktop with Docker Compose v2
+- The .NET 8 SDK for local builds and tests
+- The supplied assignment files in a sibling folder named `Assignment-DotNet` (the Compose seed mount points to `../Assignment-DotNet/member_states.csv`)
+
+## Run locally
+
+From this directory in PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+# Edit .env and replace the sample password with a local development password.
+docker compose up --build
+```
+
+The PostgreSQL database uses a named persistent volume. Uploaded files will use a separate persistent volume. The API publishes at <http://localhost:8080>; health is at `/health`, metadata at `/api/v1/meta`, and the OpenAPI document at `/openapi/v1.json`.
+
+Set `ConnectionStrings__Meridian` to use another PostgreSQL server, including Azure Database for PostgreSQL. The app does not contain connection strings or credentials. Local uploads are configured with `Storage__LocalPath`; Azure Blob and Application Insights can be enabled through provider configuration in a later implementation step.
+
+## Project layout
+
+- `src/Meridian.Api` — HTTP API and OpenAPI
+- `src/Meridian.Worker` — independent background process
+- `src/Meridian.Infrastructure` — PostgreSQL bootstrap and SQL migrations
+- `docker-compose.yml` — PostgreSQL, API and Worker
+
+Database migrations are applied at startup and recorded in `schema_migrations`. The initial migration enforces ISO alpha-3 state codes and non-overlapping, inclusive membership periods. Seed loading is repeatable.
+
+## Current implementation status
+
+The initial infrastructure step is in place and the .NET solution compiles with zero warnings. CSV upload, job claiming/progress, conflict review, snapshots, and the Angular client are not implemented yet. PostgreSQL startup and integration verification remain pending because Docker and a PostgreSQL server are unavailable in the current machine session.
+
+## Assignment material
+
+`DECISIONS.md` records domain and architecture choices. `AI_USAGE.md` describes AI assistance used in this implementation.
+
+
+## PostgreSQL integration smoke test
+
+With Compose running and the seed complete, set `MERIDIAN_TEST_CONNECTION_STRING` to the local PostgreSQL connection string and run:
+
+```powershell
+dotnet run --project tests/Meridian.PostgresSmoke
+```
+
+The smoke test connects to PostgreSQL, checks that the initial migration and seed are present, and verifies that PostgreSQL rejects overlapping membership periods. This test has not been run in the current environment because no PostgreSQL server or Docker CLI is available.
