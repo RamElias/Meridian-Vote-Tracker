@@ -8,6 +8,7 @@ namespace Meridian.Infrastructure;
 public sealed class CsvImportValidator(NpgsqlDataSource dataSource)
 {
     private const int ValidationCommandTimeoutSeconds = 120;
+    private const int LargeImportCommandTimeoutSeconds = 600;
     private sealed record MembershipPeriod(DateOnly From, DateOnly? To);
 
     public async Task<JsonDocument> ValidateAndPromoteAsync(Guid importId, CancellationToken cancellationToken)
@@ -122,46 +123,55 @@ public sealed class CsvImportValidator(NpgsqlDataSource dataSource)
             await lockConflicts.ExecuteNonQueryAsync(cancellationToken);
         await using (var voteConflicts = new NpgsqlCommand(VoteConflictSql, connection, transaction))
         {
+            voteConflicts.CommandTimeout = LargeImportCommandTimeoutSeconds;
             voteConflicts.Parameters.AddWithValue("importId", importId);
             await voteConflicts.ExecuteNonQueryAsync(cancellationToken);
         }
         await using (var defer = new NpgsqlCommand("UPDATE import_staging_rows s SET classification='Conflict',reason='Membership validation depends on the pending vote-date decision.' FROM votes v JOIN vote_versions approved ON approved.id=v.current_version_id WHERE s.import_id=@importId AND s.classification IS NULL AND v.assembly_vote_id=s.raw_values->>'assembly_vote_id' AND approved.vote_date IS DISTINCT FROM (s.raw_values->>'vote_date')::date AND NOT EXISTS (SELECT 1 FROM membership_periods p WHERE p.country_code=(s.raw_values->>'country_code')::char(3) AND p.member_from<=approved.vote_date AND (p.member_to IS NULL OR p.member_to>=approved.vote_date))", connection, transaction))
         {
+            defer.CommandTimeout = LargeImportCommandTimeoutSeconds;
             defer.Parameters.AddWithValue("importId", importId);
             await defer.ExecuteNonQueryAsync(cancellationToken);
         }
         await using (var voteKeys = new NpgsqlCommand(InsertVoteKeysSql, connection, transaction))
         {
+            voteKeys.CommandTimeout = LargeImportCommandTimeoutSeconds;
             voteKeys.Parameters.AddWithValue("importId", importId);
             await voteKeys.ExecuteNonQueryAsync(cancellationToken);
         }
         await using (var voteVersions = new NpgsqlCommand(InsertNewVoteVersionsSql, connection, transaction))
         {
+            voteVersions.CommandTimeout = LargeImportCommandTimeoutSeconds;
             voteVersions.Parameters.AddWithValue("importId", importId);
             await voteVersions.ExecuteNonQueryAsync(cancellationToken);
         }
         await using (var countryConflicts = new NpgsqlCommand(CountryConflictSql, connection, transaction))
         {
+            countryConflicts.CommandTimeout = LargeImportCommandTimeoutSeconds;
             countryConflicts.Parameters.AddWithValue("importId", importId);
             await countryConflicts.ExecuteNonQueryAsync(cancellationToken);
         }
         await using (var defer = new NpgsqlCommand("UPDATE import_staging_rows s SET classification='Conflict',reason='Approved ballot differs; human decision required.' FROM country_votes c JOIN country_vote_versions current ON current.id=c.current_version_id WHERE s.import_id=@importId AND s.classification IS NULL AND c.assembly_vote_id=s.raw_values->>'assembly_vote_id' AND c.country_code=(s.raw_values->>'country_code')::char(3) AND current.ballot<>s.raw_values->>'ballot'", connection, transaction))
         {
+            defer.CommandTimeout = LargeImportCommandTimeoutSeconds;
             defer.Parameters.AddWithValue("importId", importId);
             await defer.ExecuteNonQueryAsync(cancellationToken);
         }
         await using (var insertKeys = new NpgsqlCommand(InsertCountryKeysSql, connection, transaction))
         {
+            insertKeys.CommandTimeout = LargeImportCommandTimeoutSeconds;
             insertKeys.Parameters.AddWithValue("importId", importId);
             await insertKeys.ExecuteNonQueryAsync(cancellationToken);
         }
         await using (var insertVersions = new NpgsqlCommand(InsertCountryVersionsSql, connection, transaction))
         {
+            insertVersions.CommandTimeout = LargeImportCommandTimeoutSeconds;
             insertVersions.Parameters.AddWithValue("importId", importId);
             await insertVersions.ExecuteNonQueryAsync(cancellationToken);
         }
         await using (var setOutcomes = new NpgsqlCommand(SetOutcomesSql, connection, transaction))
         {
+            setOutcomes.CommandTimeout = LargeImportCommandTimeoutSeconds;
             setOutcomes.Parameters.AddWithValue("importId", importId);
             await setOutcomes.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -184,6 +194,7 @@ public sealed class CsvImportValidator(NpgsqlDataSource dataSource)
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using (var command = new NpgsqlCommand("SELECT classification,count(*) FROM import_staging_rows WHERE import_id=@id GROUP BY classification ORDER BY classification", connection))
         {
+            command.CommandTimeout = LargeImportCommandTimeoutSeconds;
             command.Parameters.AddWithValue("id", importId);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken)) summary[reader.GetString(0)] = reader.GetInt64(1);
@@ -191,6 +202,7 @@ public sealed class CsvImportValidator(NpgsqlDataSource dataSource)
         var byVote = new Dictionary<string, Dictionary<string, long>>(StringComparer.Ordinal);
         await using (var command = new NpgsqlCommand("SELECT raw_values->>'assembly_vote_id',classification,count(*) FROM import_staging_rows WHERE import_id=@id GROUP BY raw_values->>'assembly_vote_id',classification ORDER BY raw_values->>'assembly_vote_id'", connection))
         {
+            command.CommandTimeout = LargeImportCommandTimeoutSeconds;
             command.Parameters.AddWithValue("id", importId);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
@@ -203,6 +215,7 @@ public sealed class CsvImportValidator(NpgsqlDataSource dataSource)
         var conflicts = new Dictionary<string, long>(StringComparer.Ordinal);
         await using (var command = new NpgsqlCommand("SELECT target_type,count(*) FROM conflicts c WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(c.proposals) proposal WHERE proposal->'source'->>'importId'=@id) GROUP BY target_type", connection))
         {
+            command.CommandTimeout = LargeImportCommandTimeoutSeconds;
             command.Parameters.AddWithValue("id", importId.ToString());
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken)) conflicts[reader.GetString(0)] = reader.GetInt64(1);
