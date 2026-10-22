@@ -87,8 +87,8 @@ export class ApiService {
     return this.snapshotsApi.getSnapshot({ id }) as Observable<SnapshotRecord>;
   }
 
-  snapshotResults(id: string): Observable<SnapshotResult[]> {
-    return this.snapshotsApi.listSnapshotResults({ id, offset: 0, limit: 500 }) as Observable<SnapshotResult[]>;
+  snapshotResults(id: string, offset = 0, limit = 100): Observable<SnapshotResult[]> {
+    return this.snapshotsApi.listSnapshotResults({ id, offset, limit }) as Observable<SnapshotResult[]>;
   }
 
   contributions(id: string, countryCode: string, after = 0): Observable<VoteContribution[]> {

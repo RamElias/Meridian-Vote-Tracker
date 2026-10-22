@@ -45,6 +45,7 @@ export class App implements OnInit, OnDestroy {
   readonly selectedVote = signal<VoteDetails | null>(null);
   readonly selectedSnapshot = signal<SnapshotRecord | null>(null);
   readonly snapshotResults = signal<SnapshotResult[]>([]);
+  readonly snapshotResultsHasMore = signal(false);
   readonly contributions = signal<VoteContribution[]>([]);
   readonly contributionsHasMore = signal(false);
   readonly busy = signal(false);
@@ -352,8 +353,24 @@ export class App implements OnInit, OnDestroy {
     this.selectedSnapshot.set(details);
     if (details.publicationYear !== null) this.publicationYear.set(details.publicationYear);
     if (details.publicationQuarter !== null) this.publicationQuarter.set(details.publicationQuarter);
-    if (details.status === 'Completed') this.snapshotResults.set(await firstValueFrom(this.api.snapshotResults(id)));
-    else this.snapshotResults.set([]);
+    if (details.status === 'Completed') {
+      const results = await firstValueFrom(this.api.snapshotResults(id));
+      this.snapshotResults.set(results);
+      this.snapshotResultsHasMore.set(results.length === 100);
+    } else {
+      this.snapshotResults.set([]);
+      this.snapshotResultsHasMore.set(false);
+    }
+  }
+
+  async loadMoreSnapshotResults(): Promise<void> {
+    const snapshot = this.selectedSnapshot();
+    if (!snapshot || !this.snapshotResultsHasMore()) return;
+    await this.run(async () => {
+      const results = await firstValueFrom(this.api.snapshotResults(snapshot.id, this.snapshotResults().length));
+      this.snapshotResults.update(current => [...current, ...results]);
+      this.snapshotResultsHasMore.set(results.length === 100);
+    });
   }
 
   async loadSnapshots(): Promise<void> {
