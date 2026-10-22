@@ -4,6 +4,7 @@ var path = args.FirstOrDefault() ?? throw new ArgumentException("Pass the path t
 using var reader = new StreamReader(path, detectEncodingFromByteOrderMarks: true);
 var count = 0;
 var firstVoteTitle = "";
+var malformedRows = 0;
 await foreach (var row in CsvRecordReader.ReadAsync(reader))
 {
     if (count == 0)
@@ -12,11 +13,19 @@ await foreach (var row in CsvRecordReader.ReadAsync(reader))
     }
     else
     {
-        if (row.Count != 8) throw new InvalidDataException($"CSV record {count + 1} has {row.Count} fields instead of 8.");
+        if (row.Count != 8)
+        {
+            malformedRows++;
+            if (count + 1 != 3139 || row.Count != 5)
+                throw new InvalidDataException($"Unexpected malformed CSV record {count + 1}: {row.Count} fields.");
+            count++;
+            continue;
+        }
         if (count == 1) firstVoteTitle = row[3];
     }
     count++;
 }
 if (count < 5500 || count > 7000) throw new InvalidDataException($"Unexpected Q1 record count: {count - 1}.");
+if (malformedRows != 1) throw new InvalidDataException($"Expected the supplied malformed row to be preserved, but found {malformedRows} malformed records.");
 if (!firstVoteTitle.Contains(',')) throw new InvalidDataException("Quoted comma in resolution_title was not preserved.");
-Console.WriteLine($"PASS: parsed {count - 1} Q1 records; quoted title fields and 8-column structure are intact.");
+Console.WriteLine($"PASS: parsed {count - 1} Q1 records, preserved the malformed 5-field row, resumed parsing, and retained quoted title fields.");

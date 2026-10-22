@@ -48,6 +48,15 @@ services:
         condition: service_healthy
       api:
         condition: service_started
+  web:
+    build:
+      context: .
+      dockerfile: src/Meridian.Web/Dockerfile
+    ports:
+      - "4200:80"
+    depends_on:
+      api:
+        condition: service_started
 volumes:
   postgres_data:
   uploads:

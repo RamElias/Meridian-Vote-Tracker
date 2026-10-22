@@ -64,10 +64,12 @@ public sealed class ImportService(NpgsqlDataSource dataSource, string? configure
         return new CreatedImport(importId, status, originalId);
     }
 
-    public async Task<IReadOnlyList<object>> ListAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<object>> ListAsync(int offset, int limit, CancellationToken cancellationToken)
     {
-        const string sql = "SELECT i.id,i.file_name,i.status,i.rows_processed,i.rows_total,i.created_at,i.completed_at,i.original_import_id,u.display_name FROM imports i LEFT JOIN app_users u ON u.user_id=i.uploaded_by_user_id ORDER BY i.created_at DESC LIMIT 200";
+        const string sql = "SELECT i.id,i.file_name,i.status,i.rows_processed,i.rows_total,i.created_at,i.completed_at,i.original_import_id,u.display_name FROM imports i LEFT JOIN app_users u ON u.user_id=i.uploaded_by_user_id ORDER BY i.created_at DESC,i.id LIMIT @limit OFFSET @offset";
         await using var command = dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue("limit", Math.Clamp(limit, 1, 200));
+        command.Parameters.AddWithValue("offset", Math.Max(0, offset));
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var imports = new List<object>();
         while (await reader.ReadAsync(cancellationToken))
@@ -81,7 +83,9 @@ public sealed class ImportService(NpgsqlDataSource dataSource, string? configure
         await using var command = dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue("id", id);
         command.Parameters.AddWithValue("after", afterRow);
-        command.Parameters.AddWithValue("classification", (object?)classification ?? DBNull.Value);
+        // The filter is optional. Set its PostgreSQL type explicitly so the
+        // null case is sent as a typed text parameter on every import row query.
+        command.Parameters.Add("classification", NpgsqlDbType.Text).Value = (object?)classification ?? DBNull.Value;
         command.Parameters.AddWithValue("limit", limit);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var rows = new List<object>();

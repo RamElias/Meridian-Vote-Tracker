@@ -10,19 +10,21 @@ public sealed record ConflictDecisionResult(bool Applied, string? Message);
 
 public sealed class ConflictService(NpgsqlDataSource dataSource)
 {
-private const string PendingSql = "SELECT c.id,c.target_type,c.assembly_vote_id,c.country_code,c.current_value,(SELECT jsonb_agg(jsonb_build_object('value',p.proposal->'value','source',jsonb_build_object('importId',i.id,'fileName',i.file_name,'uploadedBy',u.display_name,'uploadedAt',i.created_at,'rowNumber',p.proposal->'source'->'rowNumber')) ORDER BY i.created_at) FROM jsonb_array_elements(c.proposals) AS p(proposal) JOIN imports i ON i.id=(p.proposal->'source'->>'importId')::uuid LEFT JOIN app_users u ON u.user_id=i.uploaded_by_user_id) AS proposals,c.created_at,(SELECT jsonb_build_object('fileName',i.file_name,'uploadedBy',u.display_name,'uploadedAt',i.created_at) FROM imports i LEFT JOIN app_users u ON u.user_id=i.uploaded_by_user_id WHERE i.id=(c.current_value->>'sourceImportId')::uuid) AS current_source FROM conflicts c WHERE c.status='Pending' AND (@voteId IS NULL OR c.assembly_vote_id=@voteId) ORDER BY c.created_at,c.id";
+private const string PendingSql = "SELECT c.id,c.target_type,c.assembly_vote_id,c.country_code,c.current_value,(SELECT jsonb_agg(jsonb_build_object('value',p.proposal->'value','source',jsonb_build_object('importId',i.id,'fileName',i.file_name,'uploadedBy',u.display_name,'uploadedAt',i.created_at,'rowNumber',p.proposal->'source'->'rowNumber')) ORDER BY i.created_at) FROM jsonb_array_elements(c.proposals) AS p(proposal) JOIN imports i ON i.id=(p.proposal->'source'->>'importId')::uuid LEFT JOIN app_users u ON u.user_id=i.uploaded_by_user_id) AS proposals,c.created_at,(SELECT jsonb_build_object('fileName',i.file_name,'uploadedBy',u.display_name,'uploadedAt',i.created_at) FROM imports i LEFT JOIN app_users u ON u.user_id=i.uploaded_by_user_id WHERE i.id=(c.current_value->>'sourceImportId')::uuid) AS current_source,c.status,c.decision_value,c.decided_by,c.decision_note,c.decided_at FROM conflicts c WHERE (@status='All' OR c.status=@status OR (@status='Resolved' AND c.status IN ('Accepted','Rejected'))) AND (@voteId IS NULL OR c.assembly_vote_id=@voteId) ORDER BY c.created_at DESC,c.id";
 
-    public async Task<IReadOnlyList<object>> ListPendingAsync(string? voteId, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<object>> ListPendingAsync(string? voteId, string status, CancellationToken cancellationToken)
     {
         await using var command = dataSource.CreateCommand(PendingSql);
-        command.Parameters.AddWithValue("voteId", (object?)voteId ?? DBNull.Value);
+        command.Parameters.Add("voteId", NpgsqlDbType.Text).Value = (object?)voteId ?? DBNull.Value;
+        command.Parameters.AddWithValue("status", status);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var results = new List<object>();
         while (await reader.ReadAsync(cancellationToken))
         {
             using var current = reader.GetFieldValue<JsonDocument>(4);
             using var proposals = reader.GetFieldValue<JsonDocument>(5);
-            results.Add(new { id = reader.GetGuid(0), targetType = reader.GetString(1), voteId = reader.GetString(2), countryCode = reader.IsDBNull(3) ? null : reader.GetString(3).Trim(), currentValue = current.RootElement.Clone(), proposals = proposals.RootElement.Clone(), createdAt = reader.GetFieldValue<DateTimeOffset>(6), currentSource = reader.IsDBNull(7) ? (object?)null : reader.GetFieldValue<JsonDocument>(7).RootElement.Clone() });
+            using var decision = reader.IsDBNull(9) ? null : reader.GetFieldValue<JsonDocument>(9);
+            results.Add(new { id = reader.GetGuid(0), targetType = reader.GetString(1), voteId = reader.GetString(2), countryCode = reader.IsDBNull(3) ? null : reader.GetString(3).Trim(), currentValue = current.RootElement.Clone(), proposals = proposals.RootElement.Clone(), createdAt = reader.GetFieldValue<DateTimeOffset>(6), currentSource = reader.IsDBNull(7) ? (object?)null : reader.GetFieldValue<JsonDocument>(7).RootElement.Clone(), status = reader.GetString(8), decisionValue = decision?.RootElement.Clone(), decidedBy = reader.IsDBNull(10) ? null : reader.GetString(10), decisionNote = reader.IsDBNull(11) ? null : reader.GetString(11), decidedAt = reader.IsDBNull(12) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(12) });
         }
         return results;
     }

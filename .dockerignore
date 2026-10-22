@@ -3,4 +3,7 @@
 .env
 **/bin/
 **/obj/
+**/node_modules/
+**/dist/
+**/.angular/
 data/uploads/

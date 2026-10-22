@@ -17,6 +17,7 @@ public sealed class CsvImportJobProcessor(NpgsqlDataSource dataSource, CsvImport
         using var logScope = logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = job.Value.CorrelationId });
         try
         {
+            await ResetStagingForRetryAsync(job.Value.ImportId, job.Value.JobId, cancellationToken);
             var import = await GetImportFileAsync(job.Value.ImportId, cancellationToken);
             var totalRows = await CountRowsAsync(import.Path, cancellationToken);
             await SetTotalAsync(job.Value.JobId, job.Value.ImportId, totalRows, cancellationToken);
@@ -46,6 +47,28 @@ public sealed class CsvImportJobProcessor(NpgsqlDataSource dataSource, CsvImport
             await MarkFailedAsync(job.Value.JobId, job.Value.ImportId, exception.Message, cancellationToken);
         }
         return true;
+    }
+
+    private async Task ResetStagingForRetryAsync(Guid importId, Guid jobId, CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using (var clearRows = new NpgsqlCommand("DELETE FROM import_staging_rows WHERE import_id=@id", connection, transaction))
+        {
+            clearRows.Parameters.AddWithValue("id", importId);
+            await clearRows.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await using (var resetImport = new NpgsqlCommand("UPDATE imports SET rows_processed=0,rows_total=NULL,report=NULL,completed_at=NULL WHERE id=@id", connection, transaction))
+        {
+            resetImport.Parameters.AddWithValue("id", importId);
+            await resetImport.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await using (var resetJob = new NpgsqlCommand("UPDATE background_jobs SET progress_current=0,progress_total=NULL,completed_at=NULL,error_message=NULL WHERE id=@id", connection, transaction))
+        {
+            resetJob.Parameters.AddWithValue("id", jobId);
+            await resetJob.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private async Task<ClaimedJob?> ClaimAsync(CancellationToken cancellationToken)

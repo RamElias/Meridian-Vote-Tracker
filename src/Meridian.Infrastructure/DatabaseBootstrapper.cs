@@ -5,6 +5,23 @@ namespace Meridian.Infrastructure;
 
 public sealed class DatabaseBootstrapper(string connectionString, ILogger<DatabaseBootstrapper> logger)
 {
+    public async Task RecoverInterruptedJobsAsync(CancellationToken cancellationToken)
+    {
+        await using var dataSource = NpgsqlDataSource.Create(connectionString);
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using (var resetImports = new NpgsqlCommand("UPDATE imports SET status='Queued',rows_processed=0,rows_total=NULL,report=NULL,completed_at=NULL WHERE id IN (SELECT (payload->>'importId')::uuid FROM background_jobs WHERE status='Running' AND job_type='csv_import')", connection, transaction))
+            await resetImports.ExecuteNonQueryAsync(cancellationToken);
+        await using (var resetSnapshots = new NpgsqlCommand("UPDATE ranking_snapshots SET status='Queued',completed_at=NULL,error_message=NULL WHERE id IN (SELECT id FROM background_jobs WHERE status='Running' AND job_type='ranking_snapshot')", connection, transaction))
+            await resetSnapshots.ExecuteNonQueryAsync(cancellationToken);
+        await using (var resetJobs = new NpgsqlCommand("UPDATE background_jobs SET status='Queued',started_at=NULL,completed_at=NULL,error_message=NULL,progress_current=0 WHERE status='Running'", connection, transaction))
+        {
+            var recovered = await resetJobs.ExecuteNonQueryAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            if (recovered > 0) logger.LogWarning("Requeued {JobCount} interrupted background jobs", recovered);
+        }
+    }
+
     public async Task InitializeAsync(string? seedFile, CancellationToken cancellationToken)
     {
         await using var dataSource = NpgsqlDataSource.Create(connectionString);

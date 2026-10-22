@@ -7,6 +7,7 @@ namespace Meridian.Infrastructure;
 
 public sealed class CsvImportValidator(NpgsqlDataSource dataSource)
 {
+    private const int ValidationCommandTimeoutSeconds = 120;
     private sealed record MembershipPeriod(DateOnly From, DateOnly? To);
 
     public async Task<JsonDocument> ValidateAndPromoteAsync(Guid importId, CancellationToken cancellationToken)
@@ -92,18 +93,21 @@ public sealed class CsvImportValidator(NpgsqlDataSource dataSource)
         const string duplicates = "WITH ranked AS (SELECT id,row_number,first_value(row_number) OVER (PARTITION BY raw_values ORDER BY row_number) AS first_row, row_number() OVER (PARTITION BY raw_values ORDER BY row_number) AS occurrence FROM import_staging_rows WHERE import_id=@id AND classification IS NULL) UPDATE import_staging_rows r SET classification='Duplicate',reason='Exact duplicate of row '||ranked.first_row FROM ranked WHERE r.id=ranked.id AND ranked.occurrence>1";
         await using (var command = new NpgsqlCommand(duplicates, connection, transaction))
         {
+            command.CommandTimeout = ValidationCommandTimeoutSeconds;
             command.Parameters.AddWithValue("id", importId);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
-        const string voteContradictions = "WITH bad AS (SELECT raw_values->>'assembly_vote_id' AS vote_id FROM import_staging_rows WHERE import_id=@id AND classification IS NULL GROUP BY raw_values->>'assembly_vote_id' HAVING count(DISTINCT jsonb_build_array(raw_values->>'session',raw_values->>'vote_date',raw_values->>'resolution_title'))>1) UPDATE import_staging_rows r SET classification='Contradiction',reason='Vote metadata differs between rows in this CSV.' FROM bad WHERE r.import_id=@id AND r.classification IS NULL AND r.raw_values->>'assembly_vote_id'=bad.vote_id";
+        const string voteContradictions = "WITH bad AS (SELECT raw_values->>'assembly_vote_id' AS vote_id FROM import_staging_rows WHERE import_id=@id AND classification IS NULL GROUP BY raw_values->>'assembly_vote_id' HAVING min(raw_values->>'session')<>max(raw_values->>'session') OR min(raw_values->>'vote_date')<>max(raw_values->>'vote_date') OR min(raw_values->>'resolution_title')<>max(raw_values->>'resolution_title')) UPDATE import_staging_rows r SET classification='Contradiction',reason='Vote metadata differs between rows in this CSV.' FROM bad WHERE r.import_id=@id AND r.classification IS NULL AND r.raw_values->>'assembly_vote_id'=bad.vote_id";
         await using (var command = new NpgsqlCommand(voteContradictions, connection, transaction))
         {
+            command.CommandTimeout = ValidationCommandTimeoutSeconds;
             command.Parameters.AddWithValue("id", importId);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
-        const string ballotContradictions = "WITH bad AS (SELECT raw_values->>'assembly_vote_id' AS vote_id,raw_values->>'country_code' AS country FROM import_staging_rows WHERE import_id=@id AND classification IS NULL GROUP BY raw_values->>'assembly_vote_id',raw_values->>'country_code' HAVING count(DISTINCT raw_values->>'ballot')>1) UPDATE import_staging_rows r SET classification='Contradiction',reason='Country has different ballots for this vote in the same CSV.' FROM bad WHERE r.import_id=@id AND r.classification IS NULL AND r.raw_values->>'assembly_vote_id'=bad.vote_id AND r.raw_values->>'country_code'=bad.country";
+        const string ballotContradictions = "WITH bad AS (SELECT raw_values->>'assembly_vote_id' AS vote_id,raw_values->>'country_code' AS country FROM import_staging_rows WHERE import_id=@id AND classification IS NULL GROUP BY raw_values->>'assembly_vote_id',raw_values->>'country_code' HAVING min(raw_values->>'ballot')<>max(raw_values->>'ballot')) UPDATE import_staging_rows r SET classification='Contradiction',reason='Country has different ballots for this vote in the same CSV.' FROM bad WHERE r.import_id=@id AND r.classification IS NULL AND r.raw_values->>'assembly_vote_id'=bad.vote_id AND r.raw_values->>'country_code'=bad.country";
         await using (var command = new NpgsqlCommand(ballotContradictions, connection, transaction))
         {
+            command.CommandTimeout = ValidationCommandTimeoutSeconds;
             command.Parameters.AddWithValue("id", importId);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -126,10 +130,15 @@ public sealed class CsvImportValidator(NpgsqlDataSource dataSource)
             defer.Parameters.AddWithValue("importId", importId);
             await defer.ExecuteNonQueryAsync(cancellationToken);
         }
-        await using (var newVotes = new NpgsqlCommand(InsertNewVotesSql, connection, transaction))
+        await using (var voteKeys = new NpgsqlCommand(InsertVoteKeysSql, connection, transaction))
         {
-            newVotes.Parameters.AddWithValue("importId", importId);
-            await newVotes.ExecuteNonQueryAsync(cancellationToken);
+            voteKeys.Parameters.AddWithValue("importId", importId);
+            await voteKeys.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await using (var voteVersions = new NpgsqlCommand(InsertNewVoteVersionsSql, connection, transaction))
+        {
+            voteVersions.Parameters.AddWithValue("importId", importId);
+            await voteVersions.ExecuteNonQueryAsync(cancellationToken);
         }
         await using (var countryConflicts = new NpgsqlCommand(CountryConflictSql, connection, transaction))
         {
@@ -161,7 +170,8 @@ public sealed class CsvImportValidator(NpgsqlDataSource dataSource)
 
     private const string VoteConflictSql = "WITH incoming AS (SELECT DISTINCT ON (s.raw_values->>'assembly_vote_id') s.raw_values->>'assembly_vote_id' AS vote_id,(s.raw_values->>'session')::integer AS session,(s.raw_values->>'vote_date')::date AS vote_date,s.raw_values->>'resolution_title' AS title,s.raw_values->>'published_at' AS published_at FROM import_staging_rows s WHERE s.import_id=@importId AND s.classification IS NULL ORDER BY s.raw_values->>'assembly_vote_id',s.row_number), changed AS (SELECT i.*,cv.session AS old_session,cv.vote_date AS old_date,cv.resolution_title AS old_title,cv.source_import_id AS old_source FROM incoming i JOIN votes v ON v.assembly_vote_id=i.vote_id JOIN vote_versions cv ON cv.id=v.current_version_id WHERE (i.session,i.vote_date,i.title) IS DISTINCT FROM (cv.session,cv.vote_date,cv.resolution_title)), proposals AS (SELECT changed.*,jsonb_build_object('value',jsonb_build_object('session',session,'voteDate',vote_date,'title',title,'publishedAt',published_at),'source',jsonb_build_object('importId',@importId)) AS proposal FROM changed) INSERT INTO conflicts(id,target_type,assembly_vote_id,current_value,proposals,opened_by_import_id) SELECT gen_random_uuid(),'VoteMetadata',vote_id,jsonb_build_object('session',old_session,'voteDate',old_date,'title',old_title,'sourceImportId',old_source),jsonb_build_array(proposal),@importId FROM proposals ON CONFLICT (assembly_vote_id) WHERE target_type='VoteMetadata' AND status='Pending' DO UPDATE SET proposals=CASE WHEN conflicts.proposals @> EXCLUDED.proposals THEN conflicts.proposals ELSE conflicts.proposals||EXCLUDED.proposals END";
 
-    private const string InsertNewVotesSql = "WITH incoming AS (SELECT DISTINCT ON (s.raw_values->>'assembly_vote_id') s.raw_values->>'assembly_vote_id' AS vote_id,(s.raw_values->>'session')::integer AS session,(s.raw_values->>'vote_date')::date AS vote_date,s.raw_values->>'resolution_title' AS title,(s.raw_values->>'published_at')::timestamptz AS published_at FROM import_staging_rows s WHERE s.import_id=@importId AND s.classification IS NULL ORDER BY s.raw_values->>'assembly_vote_id',s.row_number), new_keys AS (INSERT INTO votes(assembly_vote_id) SELECT i.vote_id FROM incoming i ON CONFLICT DO NOTHING RETURNING assembly_vote_id), versions AS (INSERT INTO vote_versions(assembly_vote_id,session,vote_date,resolution_title,published_at,source_import_id) SELECT i.vote_id,i.session,i.vote_date,i.title,i.published_at,@importId FROM incoming i JOIN votes v ON v.assembly_vote_id=i.vote_id WHERE v.current_version_id IS NULL RETURNING id,assembly_vote_id) UPDATE votes v SET current_version_id=versions.id FROM versions WHERE v.assembly_vote_id=versions.assembly_vote_id";
+    private const string InsertVoteKeysSql = "INSERT INTO votes(assembly_vote_id) SELECT DISTINCT raw_values->>'assembly_vote_id' FROM import_staging_rows WHERE import_id=@importId AND classification IS NULL ON CONFLICT DO NOTHING";
+    private const string InsertNewVoteVersionsSql = "WITH incoming AS (SELECT DISTINCT ON (s.raw_values->>'assembly_vote_id') s.raw_values->>'assembly_vote_id' AS vote_id,(s.raw_values->>'session')::integer AS session,(s.raw_values->>'vote_date')::date AS vote_date,s.raw_values->>'resolution_title' AS title,(s.raw_values->>'published_at')::timestamptz AS published_at FROM import_staging_rows s WHERE s.import_id=@importId AND s.classification IS NULL ORDER BY s.raw_values->>'assembly_vote_id',s.row_number), versions AS (INSERT INTO vote_versions(assembly_vote_id,session,vote_date,resolution_title,published_at,source_import_id) SELECT i.vote_id,i.session,i.vote_date,i.title,i.published_at,@importId FROM incoming i JOIN votes v ON v.assembly_vote_id=i.vote_id WHERE v.current_version_id IS NULL RETURNING id,assembly_vote_id) UPDATE votes v SET current_version_id=versions.id FROM versions WHERE v.assembly_vote_id=versions.assembly_vote_id";
 
     private const string CountryConflictSql = "WITH incoming AS (SELECT DISTINCT ON (s.raw_values->>'assembly_vote_id',s.raw_values->>'country_code') s.raw_values->>'assembly_vote_id' AS vote_id,s.raw_values->>'country_code' AS country,s.raw_values->>'ballot' AS ballot,s.raw_values->>'country_name' AS country_name,s.row_number FROM import_staging_rows s WHERE s.import_id=@importId AND s.classification IS NULL ORDER BY s.raw_values->>'assembly_vote_id',s.raw_values->>'country_code',s.row_number), changed AS (SELECT i.*,old.ballot AS old_ballot,old.country_name AS old_name,old.source_import_id AS old_source FROM incoming i JOIN country_votes c ON c.assembly_vote_id=i.vote_id AND c.country_code=i.country::char(3) JOIN country_vote_versions old ON old.id=c.current_version_id WHERE old.ballot<>i.ballot), proposals AS (SELECT changed.*,jsonb_build_object('value',jsonb_build_object('ballot',ballot,'countryName',country_name),'source',jsonb_build_object('importId',@importId,'rowNumber',row_number)) AS proposal FROM changed) INSERT INTO conflicts(id,target_type,assembly_vote_id,country_code,current_value,proposals,opened_by_import_id) SELECT gen_random_uuid(),'CountryVote',vote_id,country,jsonb_build_object('ballot',old_ballot,'countryName',old_name,'sourceImportId',old_source),jsonb_build_array(proposal),@importId FROM proposals ON CONFLICT (assembly_vote_id,country_code) WHERE target_type='CountryVote' AND status='Pending' DO UPDATE SET proposals=CASE WHEN conflicts.proposals @> EXCLUDED.proposals THEN conflicts.proposals ELSE conflicts.proposals||EXCLUDED.proposals END";
 

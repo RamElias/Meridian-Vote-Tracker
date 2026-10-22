@@ -1,0 +1,206 @@
+<div class="app-shell" (keydown.escape)="closeImportDetails()">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">M</div>
+      <div><strong>MERIDIAN</strong><span>VOTE TRACKER</span></div>
+    </div>
+    <div class="workspace-label">WORKSPACE</div>
+    <nav aria-label="Primary navigation">
+      <button type="button" [class.active]="section() === 'imports'" (click)="chooseSection('imports')"><span class="nav-icon">↥</span> Data imports <span class="nav-count">{{ imports().length }}</span></button>
+      <button type="button" [class.active]="section() === 'review'" (click)="chooseSection('review')"><span class="nav-icon">◈</span> Conflict review <span class="nav-count warning-count">{{ conflicts().length }}</span></button>
+      <button type="button" [class.active]="section() === 'positions'" (click)="chooseSection('positions')"><span class="nav-icon">◎</span> Vote positions</button>
+      <button type="button" [class.active]="section() === 'snapshots'" (click)="chooseSection('snapshots')"><span class="nav-icon">▤</span> Rankings & snapshots</button>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="system-status"><span class="status-dot"></span><span><strong>Systems operational</strong><small>API · Worker · PostgreSQL</small></span></div>
+      <div class="sidebar-foot">MERIDIAN · INTERNAL</div>
+    </div>
+  </aside>
+
+  <main class="main-area">
+    <header class="topbar">
+      <div>
+        <div class="breadcrumb">Meridian <span>/</span> {{ section() === 'imports' ? 'Data imports' : section() === 'review' ? 'Conflict review' : section() === 'positions' ? 'Vote positions' : 'Rankings & snapshots' }}</div>
+        <h1>{{ section() === 'imports' ? 'Data imports' : section() === 'review' ? 'Conflict review' : section() === 'positions' ? 'Vote positions' : 'Rankings & snapshots' }}</h1>
+      </div>
+      <div class="top-actions">
+        <div class="api-indicator"><span class="status-dot"></span> API connected</div>
+        <label class="user-picker"><span>Signed in as</span><select [ngModel]="api.demoUser()" (ngModelChange)="setUser($event)"><option value="lana">Lana · Admin</option><option value="dana">Dana · Analyst</option><option value="omer">Omer · Analyst</option></select></label>
+        <button class="icon-button" type="button" title="Refresh data" (click)="refreshAll()">↻</button>
+      </div>
+    </header>
+
+    @if (error()) { <div class="alert alert-error" role="alert"><span>!</span>{{ error() }}<button type="button" (click)="clearMessages()">×</button></div> }
+    @if (notice()) { <div class="alert alert-success" role="status"><span>✓</span>{{ notice() }}<button type="button" (click)="clearMessages()">×</button></div> }
+
+    @if (section() === 'imports') {
+      <section class="page-intro"><div><p>Bring Assembly voting data into the review workflow.</p><div class="metadata-line">Uploads are processed in the background. Progress and row-level results remain available after refresh.</div></div><span class="eyebrow">INGESTION</span></section>
+      <div class="stats-row">
+        <article class="stat-card"><span class="stat-label">TOTAL IMPORTS</span><strong>{{ imports().length }}</strong><small>Most recent first</small></article>
+        <article class="stat-card"><span class="stat-label">PROCESSING</span><strong>{{ processingCount() }}</strong><small>Queued or running</small></article>
+        <article class="stat-card"><span class="stat-label">COMPLETED</span><strong>{{ completedImportCount() }}</strong><small>Ready for review</small></article>
+        <article class="stat-card"><span class="stat-label">OPEN CONFLICTS</span><strong>{{ conflicts().length }}</strong><small>Need a human decision</small></article>
+      </div>
+      <div class="content-grid import-grid">
+        <section class="panel upload-panel">
+          <div class="panel-heading"><div><span class="section-kicker">NEW UPLOAD</span><h2>Import a CSV file</h2></div><span class="step-pill">01 / 03</span></div>
+          <label class="drop-zone"><input type="file" accept=".csv,text/csv" (change)="onFileSelected($event)" /><span class="upload-icon">↥</span><strong>{{ selectedFileName() }}</strong><small>CSV · up to 150 MB</small><span class="browse-link">Choose file</span></label>
+          <div class="upload-foot"><span>Expected columns are validated automatically.</span><button class="button button-primary" type="button" [disabled]="busy() || !hasSelectedFile()" (click)="upload()">Upload and process <span>→</span></button></div>
+        </section>
+        <section class="panel import-guide">
+          <span class="section-kicker">WHAT HAPPENS NEXT</span><h2>Safe, traceable ingestion</h2>
+          <div class="guide-step"><span>1</span><div><strong>Stage</strong><small>Source rows are retained with their original values.</small></div></div>
+          <div class="guide-step"><span>2</span><div><strong>Validate</strong><small>Membership, ballots and internal consistency are checked.</small></div></div>
+          <div class="guide-step"><span>3</span><div><strong>Review</strong><small>Valid new rows are promoted; changes wait for review.</small></div></div>
+        </section>
+      </div>
+      <section class="panel table-panel">
+        <div class="panel-heading"><div><span class="section-kicker">HISTORY</span><h2>Recent imports</h2></div><button class="text-button" type="button" (click)="loadImports()">Refresh list ↻</button></div>
+        @if (imports().length) {
+          <div class="table-scroll"><table><thead><tr><th>FILE</th><th>STATUS</th><th>PROGRESS</th><th>UPLOADED BY</th><th>CREATED</th><th></th></tr></thead><tbody>
+            @for (item of imports(); track item.id) {
+              <tr class="click-row" [class.selected-row]="selectedImport()?.id === item.id" (click)="openImport(item)">
+                <td><span class="file-cell"><span class="file-icon">CSV</span><span><strong>{{ item.fileName }}</strong><small>{{ item.id | slice:0:8 }}</small></span></span></td>
+                <td><span class="status-badge" [class]="'status-badge ' + statusClass(item.status)">{{ item.status }}</span></td>
+                <td><div class="progress-cell"><div class="progress-track"><span [style.width.%]="progress(item)"></span></div><small>{{ item.rowsProcessed | number }} / {{ item.rowsTotal ?? '—' }}</small></div></td>
+                <td>{{ item.uploadedBy ?? '—' }}</td><td>{{ item.createdAt | date:'medium' }}</td><td class="arrow-cell">›</td>
+              </tr>
+            }
+          </tbody></table></div>
+        } @else { <div class="empty-state"><span>↥</span><strong>No imports yet</strong><small>Choose a CSV above to start the first data import.</small></div> }
+        @if (importsHasMore()) { <div class="pagination-footer"><button class="button button-quiet" type="button" [disabled]="busy()" (click)="loadMoreImports()">Load more imports</button></div> }
+      </section>
+      @if (selectedImport()) {
+        <div class="modal-backdrop" role="presentation" tabindex="-1" (click)="closeImportDetails()" (keydown.escape)="closeImportDetails()">
+        <section class="panel detail-panel import-modal" role="dialog" aria-modal="true" aria-labelledby="import-report-title" (click)="$event.stopPropagation()"><div class="panel-heading modal-heading"><div><span class="section-kicker">IMPORT REPORT</span><h2 id="import-report-title">{{ selectedImport()?.fileName }}</h2></div><button class="icon-button" type="button" title="Close import report" (click)="closeImportDetails()">×</button></div>
+          <div class="modal-content">
+          <div class="detail-meta"><span>Status <strong><span class="status-badge" [class]="'status-badge ' + statusClass(selectedImport()?.status ?? '')">{{ selectedImport()?.status }}</span></strong></span><span>Import ID <code>{{ selectedImport()?.id }}</code></span><span>Rows processed <strong>{{ selectedImport()?.rowsProcessed | number }} / {{ selectedImport()?.rowsTotal | number }}</strong></span><span>Uploaded by <strong>{{ selectedImport()?.uploadedBy ?? 'Unknown' }}</strong></span></div>
+          @if (selectedImport()?.report) {
+            <div class="outcome-grid">
+              @for (outcome of importSummary(); track outcome.key) {
+                <article class="outcome-card" [class]="'outcome-card outcome-' + outcome.key.toLowerCase()"><span>{{ outcome.label }}</span><strong>{{ outcome.count | number }}</strong></article>
+              }
+            </div>
+            @if (importVoteRows().length) {
+              <section class="report-section"><div class="panel-heading"><div><span class="section-kicker">RESULTS BY VOTE</span><h3>Vote outcomes</h3></div><span class="count-pill">{{ importVoteRows().length }} votes</span></div>
+                <div class="table-scroll"><table><thead><tr><th>ASSEMBLY VOTE</th><th>RESULTS</th><th>ROWS</th></tr></thead><tbody>
+                  @for (vote of importVoteRows(); track vote.voteId) {
+                    <tr><td><strong>{{ vote.voteId }}</strong></td><td><div class="outcome-pills">@for (outcome of vote.counts; track outcome.key) { <span class="result-pill" [class]="'result-pill result-' + outcome.key.toLowerCase()">{{ outcome.count }} {{ outcome.label }}</span> }</div></td><td>{{ vote.total | number }}</td></tr>
+                  }
+                </tbody></table></div>
+              </section>
+            }
+          } @else { <div class="alert alert-info"><span>i</span>No row report is available for this import yet.</div> }
+          <section class="report-section row-review-section"><div class="panel-heading"><div><span class="section-kicker">SOURCE ROWS</span><h3>Row-level results</h3><p class="metadata-line">Showing up to 100 rows per filter, with the original CSV values and any validation reason.</p></div><label class="filter-label">Filter rows<select [ngModel]="importRowFilter()" (ngModelChange)="setImportRowFilter($event)"><option value="">All results</option><option value="New">New</option><option value="NoChange">Unchanged</option><option value="Conflict">Needs review</option><option value="Invalid">Invalid</option><option value="Contradiction">Contradiction</option><option value="Duplicate">Duplicate</option></select></label></div>
+            @if (importRows().length) {
+              <div class="table-scroll"><table><thead><tr><th>ROW</th><th>VOTE</th><th>COUNTRY</th><th>BALLOT</th><th>RESULT</th><th>DETAIL</th></tr></thead><tbody>
+                @for (row of importRows(); track row.rowNumber) {
+                  <tr><td>{{ row.rowNumber }}</td><td><strong>{{ row.values['assembly_vote_id'] ?? '—' }}</strong></td><td>{{ row.values['country_name'] ?? row.values['country_code'] ?? '—' }} <small class="subcell">{{ row.values['country_code'] ?? '' }}</small></td><td><span class="ballot-pill">{{ ballotLabel(row.values['ballot']) }}</span></td><td><span class="status-badge" [class]="'status-badge ' + statusClass(row.classification ?? 'Unclassified')">{{ outcomeLabel(row.classification ?? 'Unclassified') }}</span></td><td class="reason-cell">{{ row.reason ?? '—' }}</td></tr>
+                }
+              </tbody></table></div>
+            } @else { <div class="compact-empty">No rows match this filter.</div> }
+            @if (importRowsHasMore()) { <div class="pagination-footer"><button class="button button-quiet" type="button" [disabled]="busy()" (click)="loadMoreImportRows()">Load next 100 rows</button></div> }
+          </section>
+          </div>
+        </section>
+        </div>
+      }
+    }
+
+    @if (section() === 'review') {
+      <section class="page-intro"><div><p>Resolve proposed changes without overwriting approved values silently.</p><div class="metadata-line">Each decision is attributed to the selected user and recorded in the audit trail.</div></div><span class="eyebrow">HUMAN REVIEW</span></section>
+      <div class="review-summary"><span class="review-mark">◈</span><div><strong>{{ conflicts().length }} {{ conflictStatus() === 'Pending' ? 'open' : 'resolved' }} review item{{ conflicts().length === 1 ? '' : 's' }}</strong><small>Select an item to compare its values, sources and decision.</small></div><label class="conflict-filter">Vote ID<input [ngModel]="conflictVoteFilter()" (ngModelChange)="conflictVoteFilter.set($event)" (keyup.enter)="searchConflicts()" placeholder="Filter by vote" /></label><label class="conflict-filter">Status<select [ngModel]="conflictStatus()" (ngModelChange)="conflictStatus.set($event); searchConflicts()"><option value="Pending">Pending</option><option value="Resolved">Resolved</option></select></label><button class="text-button" type="button" (click)="loadConflicts()">Refresh ↻</button></div>
+      <div class="review-layout">
+        <section class="panel conflict-queue"><div class="panel-heading"><div><span class="section-kicker">{{ conflictStatus() === 'Pending' ? 'OPEN ITEMS' : 'DECISION HISTORY' }}</span><h2>{{ conflictStatus() === 'Pending' ? 'Review queue' : 'Resolved conflicts' }}</h2></div><span class="count-pill">{{ conflicts().length }}</span></div>
+          @if (conflicts().length) {
+            <div class="conflict-queue-list">@for (conflict of conflicts(); track conflict.id) {
+              <button type="button" class="conflict-queue-item" [class.active]="selectedConflictId() === conflict.id" [attr.aria-pressed]="selectedConflictId() === conflict.id" (click)="selectConflict(conflict.id)">
+                <span class="queue-mark">{{ conflict.targetType === 'VoteMetadata' ? 'V' : 'C' }}</span><span class="queue-copy"><strong>{{ conflict.voteId }}</strong><span>{{ conflict.targetType === 'VoteMetadata' ? 'Vote details' : 'Country ballot' }}{{ conflict.countryCode ? ' · ' + conflict.countryCode : '' }}</span><small>{{ conflict.proposals.length }} proposal{{ conflict.proposals.length === 1 ? '' : 's' }} · {{ conflict.createdAt | date:'medium' }}@if (conflict.status !== 'Pending') { · {{ conflict.status }} }</small></span><span class="queue-chevron">›</span>
+              </button>
+            }</div>
+          } @else { <div class="compact-empty queue-empty">No pending conflicts.</div> }
+        </section>
+        <section class="panel conflict-detail">
+          @if (selectedConflict(); as conflict) {
+            <div class="conflict-detail-heading"><div><span class="conflict-type">{{ conflict.targetType === 'VoteMetadata' ? 'VOTE DETAILS' : 'COUNTRY BALLOT' }}</span><h2>{{ conflict.voteId }}{{ conflict.countryCode ? ' · ' + conflict.countryCode : '' }}</h2></div><span class="status-badge" [class]="'status-badge ' + (conflict.status === 'Pending' ? 'status-running' : 'status-success')">{{ conflict.status }}</span></div>
+            @if (conflict.targetType === 'CountryVote') { <p class="conflict-country-name">{{ conflict.currentValue['countryName'] }}</p> }
+            <div class="comparison-grid"><div class="value-card current-value"><span class="section-kicker">APPROVED VALUE</span><div class="human-value-list">@for (field of conflictFields(conflict.targetType, conflict.currentValue); track field.label) { <div><span>{{ field.label }}</span><strong>{{ field.text }}</strong></div> }</div>@if (conflict.currentSource) { <small class="source-caption">From {{ conflict.currentSource.fileName }} · {{ conflict.currentSource.uploadedBy ?? 'Unknown uploader' }} · {{ conflict.currentSource.uploadedAt | date:'medium' }}</small> }</div>
+              <div class="proposal-stack"><span class="section-kicker">INCOMING VALUES · {{ conflict.proposals.length }}</span>
+                @for (proposal of conflict.proposals; track $index) {
+                  <div class="proposal-card"><div class="proposal-top"><strong>Proposal {{ $index + 1 }}</strong><small>{{ proposal.source.fileName }} · {{ proposal.source.uploadedBy ?? 'Unknown' }} · {{ proposal.source.uploadedAt | date:'short' }}@if (proposal.source.rowNumber) { · row {{ proposal.source.rowNumber }} }</small></div><div class="human-value-list">@for (field of conflictFields(conflict.targetType, proposal.value); track field.label) { <div><span>{{ field.label }}</span><strong>{{ field.text }}</strong></div> }</div>@if (conflict.status === 'Pending') { <button class="button button-primary button-small" type="button" [disabled]="busy()" (click)="decide(conflict, 'Accept', $index)">Accept this value</button> }</div>
+                }
+              </div>
+            </div>
+            @if (conflict.status === 'Pending') { <div class="conflict-footer"><label class="inline-note">Decision note <input [ngModel]="decisionNote()" (ngModelChange)="decisionNote.set($event)" placeholder="Optional context for the audit trail" /></label><button class="button button-quiet" type="button" [disabled]="busy()" (click)="decide(conflict, 'Reject')">Reject proposals</button></div> }
+            @else { <div class="conflict-footer"><span>{{ conflict.status }} by {{ conflict.decidedBy ?? 'Unknown' }} · {{ conflict.decidedAt | date:'medium' }}{{ conflict.decisionNote ? ' · ' + conflict.decisionNote : '' }}</span></div> }
+          } @else { <div class="empty-state"><span>✓</span><strong>Review queue is clear</strong><small>New conflicts will appear here after an import.</small></div> }
+        </section>
+      </div>
+    }
+
+    @if (section() === 'positions') {
+      <section class="page-intro"><div><p>Set the institute's For or Against position and its relative weight.</p><div class="metadata-line">Positions are versioned. Only an Admin can save changes.</div></div><span class="eyebrow">SCORING INPUTS</span></section>
+      @if (!isAdmin()) { <div class="alert alert-info"><span>i</span>You are signed in as an Analyst. Switch to Lana · Admin to edit vote positions.</div> }
+      <div class="position-layout">
+        <section class="panel vote-list-panel"><div class="panel-heading"><div><span class="section-kicker">ASSEMBLY VOTES</span><h2>Choose a vote</h2></div><span class="count-pill">{{ votes().length }}</span></div>
+          <div class="search-box"><span>⌕</span><input [ngModel]="search()" (ngModelChange)="search.set($event)" (keyup.enter)="searchVotes()" placeholder="Search ID or resolution title"/><button type="button" (click)="searchVotes()">Search</button></div>
+          <div class="table-scroll vote-table-scroll"><table><thead><tr><th>VOTE</th><th>DATE</th><th>INSTITUTE POSITION</th><th>WEIGHT</th><th>OPEN ITEMS</th></tr></thead><tbody>
+            @for (vote of votes(); track vote.voteId) {
+              <tr class="click-row vote-table-row" [class.selected-row]="selectedVote()?.vote?.voteId === vote.voteId" tabindex="0" (click)="openVote(vote)" (keydown.enter)="openVote(vote)"><td><strong>{{ vote.voteId }}</strong><small class="subcell">{{ vote.title }}</small></td><td>{{ vote.voteDate | date:'mediumDate' }}<small class="subcell">Session {{ vote.session }}</small></td><td><span class="position-pill" [class.position-for]="vote.stance === 'Y'" [class.position-against]="vote.stance === 'N'">{{ stanceLabel(vote.stance) }}</span></td><td>{{ vote.weight ? '×' + vote.weight : '—' }}</td><td>@if (vote.pendingConflicts) { <span class="status-badge status-running">{{ vote.pendingConflicts }} pending</span> } @else { <span class="muted">—</span> }</td></tr>
+            } @empty { <tr><td colspan="5"><div class="compact-empty">No votes match this search.</div></td></tr> }
+          </tbody></table></div>
+          @if (votesHasMore()) { <div class="pagination-footer"><button class="button button-quiet" type="button" [disabled]="busy()" (click)="loadMoreVotes()">Load more votes</button></div> }
+        </section>
+        <section class="panel position-panel">
+          @if (selectedVote(); as detail) {
+            <div class="panel-heading"><div><span class="section-kicker">ASSEMBLY VOTE</span><h2>{{ detail.vote.voteId }}</h2></div><span class="status-badge" [class]="detail.vote.pendingConflicts ? 'status-badge status-running' : 'status-badge status-success'">{{ detail.vote.pendingConflicts }} open conflicts</span></div>
+            <p class="vote-title">{{ detail.vote.title }}</p><div class="detail-meta"><span>{{ detail.vote.voteDate | date:'longDate' }}</span><span>Session {{ detail.vote.session }}</span><span>Published {{ detail.vote.publishedAt | date:'mediumDate' }}</span></div>
+            <div class="position-summary"><span class="section-kicker">CURRENT INSTITUTE POSITION</span><div class="position-summary-value"><strong [class.text-for]="detail.vote.position?.stance === 'Y'" [class.text-against]="detail.vote.position?.stance === 'N'">{{ detail.vote.position ? stanceLabel(detail.vote.position.stance) : 'No position set' }}</strong><span>{{ detail.vote.position ? 'Weight ×' + detail.vote.position.weight : 'This vote is not included in a ranking until a position is set.' }}</span></div></div>
+            <section class="vote-ballots"><div class="panel-heading"><div><span class="section-kicker">APPROVED COUNTRY BALLOTS</span><h3>Country votes</h3></div><span class="count-pill">{{ detail.countryVotes.length }}</span></div>
+              @if (detail.countryVotes.length) { <div class="table-scroll"><table><thead><tr><th>COUNTRY</th><th>CODE</th><th>BALLOT</th></tr></thead><tbody>@for (countryVote of detail.countryVotes; track countryVote.countryCode) { <tr><td>{{ countryVote.countryName }}</td><td>{{ countryVote.countryCode }}</td><td><span class="ballot-pill">{{ ballotLabel(countryVote.ballot) }}</span></td></tr> }</tbody></table></div> }
+              @else { <div class="compact-empty">No approved country ballots are recorded for this vote.</div> }
+            </section>
+            <div class="form-divider"></div><div class="panel-heading"><div><span class="section-kicker">EDIT POSITION</span><h2>{{ detail.vote.position ? 'Update the current position' : 'Set a position' }}</h2></div></div>
+            <div class="position-form"><label>Stance<select [ngModel]="positionStance()" (ngModelChange)="positionStance.set($event)"><option value="Y">Y · For</option><option value="N">N · Against</option></select></label><label>Weight <span class="field-hint">1–5</span><input type="number" min="1" max="5" [ngModel]="positionWeight()" (ngModelChange)="positionWeight.set($event)" /></label><label class="full-field">Note <input [ngModel]="positionNote()" (ngModelChange)="positionNote.set($event)" placeholder="Optional reason for this position" /></label></div>
+            <div class="form-actions"><span class="metadata-line">Saving creates an immutable position version.</span><button class="button button-primary" type="button" [disabled]="busy() || !isAdmin()" (click)="savePosition()">Save position</button></div>
+            @if (detail.history.length) { <div class="history-block"><span class="section-kicker">VOTE HISTORY</span>@for (entry of detail.history; track $index) { <div class="history-row"><span class="timeline-dot"></span><span><strong>{{ historyActionLabel(entry.action) }}</strong><small>{{ historyChange(entry) }}</small><small class="history-meta">{{ entry.actor }} · {{ entry.occurredAt | date:'medium' }}{{ entry.note ? ' · ' + entry.note : '' }}</small></span></div> }</div> }
+          } @else { <div class="empty-state"><span>◎</span><strong>Select an Assembly vote</strong><small>The vote details and position form will appear here.</small></div> }
+        </section>
+      </div>
+    }
+
+    @if (section() === 'snapshots') {
+      <section class="page-intro"><div><p>Calculate a reproducible country ranking from approved votes and positions.</p><div class="metadata-line">Each snapshot preserves its selected votes, versions, rule version and per-vote contributions.</div></div><span class="eyebrow">RANKING ENGINE</span></section>
+      <div class="snapshot-layout">
+        <section class="panel create-snapshot-panel"><div class="panel-heading"><div><span class="section-kicker">NEW CALCULATION</span><h2>Select vote inputs</h2></div><span class="step-pill">ALIGNMENT V1</span></div>
+          <label class="field-label">Session <span>Optional</span><input type="number" min="1" [ngModel]="snapshotSession()" (ngModelChange)="snapshotSession.set($event)" placeholder="e.g. 79" /></label>
+          <div class="form-two"><label class="field-label">From date <span>Optional</span><input type="date" [ngModel]="snapshotFrom()" (ngModelChange)="snapshotFrom.set($event)" /></label><label class="field-label">To date <span>Optional</span><input type="date" [ngModel]="snapshotTo()" (ngModelChange)="snapshotTo.set($event)" /></label></div>
+          <label class="field-label">Specific vote IDs <span>Optional · comma separated</span><textarea rows="2" [ngModel]="snapshotVoteIds()" (ngModelChange)="snapshotVoteIds.set($event)" placeholder="MA/2024/001, MA/2024/002"></textarea></label>
+          <div class="form-actions"><small>Every selected vote needs an approved position.</small><button class="button button-primary" type="button" [disabled]="busy()" (click)="createSnapshot()">Calculate ranking <span>→</span></button></div>
+        </section>
+        <section class="panel snapshot-history-panel"><div class="panel-heading"><div><span class="section-kicker">HISTORY</span><h2>Snapshots</h2></div><button class="text-button" type="button" (click)="loadSnapshots()">Refresh ↻</button></div>
+          @for (item of snapshots(); track item.id) {
+            <button class="snapshot-row" [class.active]="selectedSnapshot()?.id === item.id" type="button" (click)="openSnapshot(item)"><span class="snapshot-mark">▤</span><span class="snapshot-main"><strong>{{ item.publicationYear ? item.publicationYear + ' Q' + item.publicationQuarter : 'Unpublished calculation' }}</strong><small>{{ item.selectedVoteCount }} vote{{ item.selectedVoteCount === 1 ? '' : 's' }} · {{ item.createdAt | date:'medium' }}</small><span class="progress-track"><span [style.width.%]="progress(item)"></span></span></span><span class="status-badge" [class]="'status-badge ' + statusClass(snapshotStatus(item))">{{ snapshotStatus(item) }}</span></button>
+          } @empty { <div class="compact-empty">No ranking snapshots have been calculated.</div> }
+        </section>
+      </div>
+      @if (selectedSnapshot(); as snapshot) {
+        <section class="panel result-panel"><div class="panel-heading"><div><span class="section-kicker">SNAPSHOT DETAIL · {{ snapshot.ruleVersion }}</span><h2>{{ snapshot.status === 'Completed' ? 'Ranking results' : snapshot.status }}</h2></div><span class="status-badge" [class]="'status-badge ' + statusClass(snapshot.status)">{{ snapshot.status }}</span></div>
+          @if (snapshot.status === 'Queued' || snapshot.status === 'Running') { <div class="job-progress"><div class="progress-track"><span [style.width.%]="progress(snapshot)"></span></div><span>{{ snapshot.progressCurrent | number }} / {{ snapshot.progressTotal | number }} contributions</span></div> }
+          @if (snapshot.error) { <div class="alert alert-error">{{ snapshot.error }}</div> }
+          @if (snapshot.status === 'Completed') {
+            <div class="publication-bar"><div><strong>{{ isActivelyPublished(snapshot) ? 'Published for ' : snapshot.supersededAt ? 'Superseded from ' : snapshot.withdrawnAt ? 'Withdrawn from ' : 'Ready to publish' }}{{ snapshot.publishedAt ? snapshot.publicationYear + ' Q' + snapshot.publicationQuarter : '' }}</strong><small>{{ snapshot.selectedVoteCount }} selected vote{{ snapshot.selectedVoteCount === 1 ? '' : 's' }} · Inputs captured {{ snapshot.createdAt | date:'medium' }}</small></div>
+              @if (isAdmin()) { @if (!isActivelyPublished(snapshot)) { <div class="publish-form"><input type="number" min="2000" max="2100" [ngModel]="publicationYear()" (ngModelChange)="publicationYear.set($event)" aria-label="Publication year"/><select [ngModel]="publicationQuarter()" (ngModelChange)="publicationQuarter.set($event)" aria-label="Publication quarter"><option [ngValue]="1">Q1</option><option [ngValue]="2">Q2</option><option [ngValue]="3">Q3</option><option [ngValue]="4">Q4</option></select><label class="replace-check"><input type="checkbox" [ngModel]="replaceActive()" (ngModelChange)="replaceActive.set($event)"/> Replace active</label><button class="button button-primary button-small" type="button" [disabled]="busy()" (click)="publishSnapshot()">Publish</button></div> } @else { <button class="button button-quiet" type="button" [disabled]="busy()" (click)="withdrawSnapshot(snapshot)">Withdraw publication</button> } }
+            </div>
+            <div class="ranking-legend"><span><strong>Alignment</strong> agreement on Y/N votes</span><span><strong>Participation</strong> Y/N/A ballots cast</span><span><strong>Coverage</strong> approved member ballots</span></div>
+            <div class="table-scroll"><table><thead><tr><th>RANK</th><th>COUNTRY</th><th>ALIGNMENT</th><th>PARTICIPATION</th><th>COVERAGE</th><th>APPROVED / ELIGIBLE</th></tr></thead><tbody>@for (result of snapshotResults(); track result.countryCode) { <tr><td><span class="rank-number">{{ result.rank ?? '—' }}</span></td><td><span class="country-cell"><strong>{{ result.countryName }}</strong><small>{{ result.countryCode }}</small></span></td><td><div class="metric-cell"><strong>{{ formatPercent(result.alignmentScore) }}</strong>@if (result.alignmentScore !== null) { <span class="metric-track"><i [style.width.%]="result.alignmentScore"></i></span> }</div></td><td>{{ formatPercent(result.participationPercent) }}</td><td>{{ formatPercent(result.coveragePercent) }}</td><td>{{ result.approvedMemberRecords | number }} / {{ result.eligibleMemberVotes | number }}</td></tr> }</tbody></table></div>
+            <div class="contribution-search"><div><span class="section-kicker">CONTRIBUTION DETAIL</span><strong>Inspect a country's vote-by-vote calculation</strong></div><label><input maxlength="3" [ngModel]="countryCode()" (ngModelChange)="countryCode.set($event)" placeholder="USA"/><button class="button button-quiet" type="button" (click)="loadContributions()">Show detail</button></label></div>
+            @if (contributions().length) { <div class="table-scroll"><table><thead><tr><th>VOTE</th><th>DATE</th><th>INSTITUTE POSITION</th><th>COUNTRY BALLOT</th><th>ALIGNMENT CREDIT</th><th>MEMBER</th></tr></thead><tbody>@for (entry of contributions(); track entry.ordinal) { <tr><td><strong>{{ entry.voteId }}</strong><small class="subcell">{{ entry.title }}</small></td><td>{{ entry.voteDate | date:'mediumDate' }}</td><td>{{ stanceLabel(entry.instituteStance) }} · ×{{ entry.weight }}</td><td><span class="ballot-pill">{{ ballotLabel(entry.ballot) }}</span></td><td><strong>{{ entry.alignmentNumerator | number }} / {{ entry.alignmentDenominator | number }}</strong></td><td>{{ entry.memberAtVote ? 'Yes' : 'No' }}</td></tr> }</tbody></table></div> }
+            @if (contributionsHasMore()) { <div class="pagination-footer"><button class="button button-quiet" type="button" [disabled]="busy()" (click)="loadMoreContributions()">Load more contributions</button></div> }
+          }
+        </section>
+      }
+    }
+    <footer class="page-footer"><span>MERIDIAN VOTE TRACKER</span><span>Decision-grade data · Audited by design</span></footer>
+  </main>
+</div>
