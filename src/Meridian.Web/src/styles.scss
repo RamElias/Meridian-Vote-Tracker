@@ -431,3 +431,10 @@ td { padding: 13px 15px; font-size: 12px; }
 .conflict-filter { display: grid; gap: 4px; color: #778a99; font-size: 10px; }
 .conflict-filter input, .conflict-filter select { min-height: 32px; padding: 6px 9px; border: 1px solid #dce4e9; border-radius: 5px; color: #344c60; background: #fff; font: inherit; font-size: 11px; }
 .vote-ballots { margin: 18px 0; padding: 14px 0; border-top: 1px solid #edf1f3; border-bottom: 1px solid #edf1f3; }
+
+.field-error { display:block; color:#b42318; margin-top:6px; font-size:12px; }
+
+app-imports-page, app-review-page, app-positions-page, app-snapshots-page { display:block; }
+.calculation-rules { margin:12px 0; color:#52667b; font-size:13px; }
+.calculation-rules summary { cursor:pointer; font-weight:600; }
+.calculation-rules p { margin-top:8px; line-height:1.6; }

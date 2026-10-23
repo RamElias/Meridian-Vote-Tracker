@@ -1,0 +1,30 @@
+# Disposable test infrastructure. No ports, application databases or .env credentials are used.
+services:
+  postgres-tests:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: integration_only
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  integration-tests:
+    image: mcr.microsoft.com/dotnet/sdk:8.0
+    working_dir: /tmp/meridian-tests
+    volumes:
+      - .:/source:ro
+    environment:
+      MERIDIAN_TEST_CONNECTION_STRING: Host=postgres-tests;Database=postgres;Username=postgres;Password=integration_only
+    depends_on:
+      postgres-tests:
+        condition: service_healthy
+    entrypoint: ["bash", "-lc"]
+    command:
+      - >-
+        mkdir -p /tmp/meridian-tests &&
+        tar --exclude=bin --exclude=obj --exclude=node_modules --exclude=dist --exclude=.angular -C /source -cf - Directory.Build.props NuGet.Config Meridian.VoteTracker.sln src tests | tar -C /tmp/meridian-tests -xf - &&
+        dotnet build Meridian.VoteTracker.sln &&
+        dotnet run --no-build --project tests/Meridian.IntegrationTests -- ${MERIDIAN_TEST_ARGS:---large}

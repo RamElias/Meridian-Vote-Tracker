@@ -986,7 +986,8 @@
                 "type": "object",
                 "required": [
                   "stance",
-                  "weight"
+                  "weight",
+                  "expectedVersionId"
                 ],
                 "properties": {
                   "stance": {
@@ -1003,6 +1004,11 @@
                   },
                   "note": {
                     "type": "string",
+                    "nullable": true
+                  },
+                  "expectedVersionId": {
+                    "type": "integer",
+                    "format": "int64",
                     "nullable": true
                   }
                 }
@@ -1050,6 +1056,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "Position was updated by another user. Includes currentPosition.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1089,13 +1105,15 @@
           "detail": {
             "type": "string",
             "nullable": true
+          },
+          "correlationId": {
+            "type": "string"
           }
         },
         "required": [
           "type",
           "title",
-          "status",
-          "detail"
+          "status"
         ]
       },
       "Metadata": {
@@ -1146,6 +1164,14 @@
           "uploadedBy": {
             "type": "string",
             "nullable": true
+          },
+          "progress": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/JobProgress"
+              }
+            ],
+            "nullable": true
           }
         },
         "required": [
@@ -1186,6 +1212,12 @@
           },
           "flaggedRows": {
             "type": "integer"
+          },
+          "normalizedRows": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
           }
         }
       },
@@ -1224,7 +1256,19 @@
             "nullable": true
           },
           "report": {
-            "$ref": "#/components/schemas/ImportReport",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportReport"
+              }
+            ],
+            "nullable": true
+          },
+          "progress": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/JobProgress"
+              }
+            ],
             "nullable": true
           }
         },
@@ -1258,13 +1302,23 @@
           "values": {
             "type": "object",
             "additionalProperties": true
+          },
+          "normalizedValues": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "normalizations": {
+            "type": "object",
+            "additionalProperties": true
           }
         },
         "required": [
           "rowNumber",
           "classification",
           "reason",
-          "values"
+          "values",
+          "normalizedValues",
+          "normalizations"
         ]
       },
       "ImportAccepted": {
@@ -1373,6 +1427,18 @@
           },
           "sourceImportId": {
             "type": "string"
+          },
+          "sourceFileName": {
+            "type": "string",
+            "nullable": false
+          },
+          "uploadedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "uploadedAt": {
+            "type": "string",
+            "nullable": false
           }
         },
         "required": [
@@ -1380,7 +1446,10 @@
           "countryName",
           "ballot",
           "versionId",
-          "sourceImportId"
+          "sourceImportId",
+          "sourceFileName",
+          "uploadedBy",
+          "uploadedAt"
         ]
       },
       "VoteHistory": {
@@ -1408,6 +1477,18 @@
           },
           "occurredAt": {
             "type": "string"
+          },
+          "sourceImportId": {
+            "type": "string",
+            "nullable": true
+          },
+          "sourceFileName": {
+            "type": "string",
+            "nullable": true
+          },
+          "entityKey": {
+            "type": "string",
+            "nullable": false
           }
         },
         "required": [
@@ -1417,32 +1498,57 @@
           "newValue",
           "note",
           "correlationId",
-          "occurredAt"
+          "occurredAt",
+          "sourceImportId",
+          "sourceFileName",
+          "entityKey"
         ]
       },
       "VoteDetails": {
         "type": "object",
         "properties": {
           "vote": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/VoteSummary"
+            "type": "object",
+            "properties": {
+              "voteId": {
+                "type": "string"
               },
-              {
-                "type": "object",
-                "properties": {
-                  "voteVersionId": {
-                    "type": "integer"
-                  },
-                  "publishedAt": {
-                    "type": "string"
-                  },
-                  "position": {
-                    "$ref": "#/components/schemas/Position",
-                    "nullable": true
+              "session": {
+                "type": "integer"
+              },
+              "voteDate": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "pendingConflicts": {
+                "type": "integer"
+              },
+              "voteVersionId": {
+                "type": "integer"
+              },
+              "publishedAt": {
+                "type": "string"
+              },
+              "position": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Position"
                   }
-                }
+                ],
+                "nullable": true
               }
+            },
+            "required": [
+              "voteId",
+              "session",
+              "voteDate",
+              "title",
+              "pendingConflicts",
+              "voteVersionId",
+              "publishedAt",
+              "position"
             ]
           },
           "countryVotes": {
@@ -1491,7 +1597,14 @@
                 "type": "integer",
                 "nullable": true
               }
-            }
+            },
+            "required": [
+              "importId",
+              "fileName",
+              "uploadedBy",
+              "uploadedAt",
+              "rowNumber"
+            ]
           }
         },
         "required": [
@@ -1533,7 +1646,12 @@
                 "type": "string"
               }
             },
-            "nullable": true
+            "nullable": true,
+            "required": [
+              "fileName",
+              "uploadedBy",
+              "uploadedAt"
+            ]
           },
           "proposals": {
             "type": "array",
@@ -1545,7 +1663,12 @@
             "type": "string"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "Pending",
+              "Accepted",
+              "Rejected"
+            ]
           },
           "decisionValue": {
             "type": "object",
@@ -1648,6 +1771,34 @@
             "type": "integer"
           },
           "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "progress": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/JobProgress"
+              }
+            ],
+            "nullable": true
+          },
+          "inputsCapturedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "selection": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "publishedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "withdrawnBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "supersededBy": {
             "type": "string",
             "nullable": true
           }
@@ -1797,7 +1948,31 @@
         ]
       },
       "PositionResult": {
-        "$ref": "#/components/schemas/Position"
+        "type": "object",
+        "properties": {
+          "versionId": {
+            "type": "integer"
+          },
+          "stance": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "integer"
+          },
+          "updatedBy": {
+            "type": "string"
+          },
+          "voteId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "versionId",
+          "stance",
+          "weight",
+          "updatedBy",
+          "voteId"
+        ]
       },
       "PublicationResult": {
         "type": "object",
@@ -1835,6 +2010,34 @@
         "required": [
           "id",
           "status"
+        ]
+      },
+      "JobProgress": {
+        "type": "object",
+        "properties": {
+          "phase": {
+            "type": "string"
+          },
+          "current": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer",
+            "nullable": true
+          },
+          "unit": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "phase",
+          "current",
+          "total",
+          "unit",
+          "updatedAt"
         ]
       }
     }

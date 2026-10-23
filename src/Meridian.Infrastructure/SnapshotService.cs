@@ -6,7 +6,7 @@ using NpgsqlTypes;
 namespace Meridian.Infrastructure;
 
 public sealed record SnapshotRequest(int? Session, DateOnly? FromDate, DateOnly? ToDate, IReadOnlyList<string>? VoteIds);
-public sealed record SnapshotCreateResult(bool Created, Guid? SnapshotId, string? Error, IReadOnlyList<string>? VotesWithoutPosition, int SelectedVoteCount);
+public sealed record SnapshotCreateResult(bool Created, Guid? SnapshotId, string? Error, IReadOnlyList<string>? VotesWithoutPosition, int SelectedVoteCount, IReadOnlyList<string>? UnknownVoteIds = null);
 public sealed record SnapshotPublicationResult(bool Applied, string? Error, bool NotFound = false);
 
 public sealed class SnapshotService(NpgsqlDataSource dataSource)
@@ -20,7 +20,7 @@ public sealed class SnapshotService(NpgsqlDataSource dataSource)
             return new SnapshotCreateResult(false, null, "Select at least one session, date boundary, or explicit vote ID.", null, 0);
         if (request.FromDate.HasValue && request.ToDate.HasValue && request.FromDate > request.ToDate)
             return new SnapshotCreateResult(false, null, "fromDate must be on or before toDate.", null, 0);
-        var ids = request.VoteIds?.Select(id => id.Trim()).Distinct(StringComparer.Ordinal).ToArray();
+        var ids = request.VoteIds?.Select(id => id?.Trim() ?? "").Distinct(StringComparer.Ordinal).ToArray();
         if (ids is { Length: > 5000 } || ids?.Any(string.IsNullOrWhiteSpace) == true)
             return new SnapshotCreateResult(false, null, "Provide at most 5,000 non-empty vote IDs.", null, 0);
 
@@ -32,6 +32,16 @@ public sealed class SnapshotService(NpgsqlDataSource dataSource)
         var sql = $"SELECT v.assembly_vote_id,vv.id,vv.session,vv.vote_date,vv.resolution_title,p.id,p.stance,p.weight FROM votes v JOIN vote_versions vv ON vv.id=v.current_version_id LEFT JOIN vote_positions vp ON vp.assembly_vote_id=v.assembly_vote_id LEFT JOIN position_versions p ON p.id=vp.current_version_id WHERE {string.Join(" AND ", filters)} ORDER BY vv.vote_date,v.assembly_vote_id";
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken);
+        if (ids is { Length: > 0 })
+        {
+            await using var known = new NpgsqlCommand("SELECT assembly_vote_id FROM votes WHERE assembly_vote_id=ANY(@ids) AND current_version_id IS NOT NULL", connection, transaction);
+            known.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Text, ids);
+            var existing = new HashSet<string>(StringComparer.Ordinal);
+            await using (var reader = await known.ExecuteReaderAsync(cancellationToken))
+                while (await reader.ReadAsync(cancellationToken)) existing.Add(reader.GetString(0));
+            var unknown = ids.Where(id => !existing.Contains(id)).ToArray();
+            if (unknown.Length > 0) return new SnapshotCreateResult(false, null, "Some requested vote IDs do not exist: " + string.Join(", ", unknown), null, 0, unknown);
+        }
         var selected = new List<SelectedVote>();
         var missing = new List<string>();
         await using (var command = new NpgsqlCommand(sql, connection, transaction))
@@ -104,24 +114,24 @@ public sealed class SnapshotService(NpgsqlDataSource dataSource)
 
     public async Task<IReadOnlyList<object>> ListAsync(CancellationToken cancellationToken)
     {
-        const string sql = "SELECT s.id,s.status,s.calculation_rule_version,s.created_by_user_id,s.created_at,s.completed_at,s.publication_year,s.publication_quarter,s.published_at,s.withdrawn_at,s.superseded_at,j.progress_current,j.progress_total,(SELECT count(*) FROM ranking_snapshot_votes v WHERE v.snapshot_id=s.id) FROM ranking_snapshots s JOIN background_jobs j ON j.id=s.id ORDER BY s.created_at DESC LIMIT 200";
+        const string sql = "SELECT s.id,s.status,s.calculation_rule_version,s.created_by_user_id,s.created_at,s.completed_at,s.publication_year,s.publication_quarter,s.published_at,s.withdrawn_at,s.superseded_at,j.progress_current,j.progress_total,(SELECT count(*) FROM ranking_snapshot_votes v WHERE v.snapshot_id=s.id),(SELECT jsonb_build_object('phase',p.phase,'current',p.current_count,'total',p.total_count,'unit',p.unit,'updatedAt',p.updated_at) FROM job_progress p WHERE p.job_id=s.id) AS progress FROM ranking_snapshots s JOIN background_jobs j ON j.id=s.id ORDER BY s.created_at DESC LIMIT 200";
         await using var command = dataSource.CreateCommand(sql);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var items = new List<object>();
         while (await reader.ReadAsync(cancellationToken))
-            items.Add(new { id = reader.GetGuid(0), status = reader.GetString(1), ruleVersion = reader.GetString(2), createdBy = reader.GetString(3), createdAt = reader.GetFieldValue<DateTimeOffset>(4), completedAt = reader.IsDBNull(5) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(5), publicationYear = reader.IsDBNull(6) ? (int?)null : reader.GetInt32(6), publicationQuarter = reader.IsDBNull(7) ? (short?)null : reader.GetInt16(7), publishedAt = reader.IsDBNull(8) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(8), withdrawnAt = reader.IsDBNull(9) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(9), supersededAt = reader.IsDBNull(10) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(10), progressCurrent = reader.GetInt64(11), progressTotal = reader.IsDBNull(12) ? (long?)null : reader.GetInt64(12), selectedVoteCount = reader.GetInt64(13) });
+            items.Add(new { id = reader.GetGuid(0), status = reader.GetString(1), ruleVersion = reader.GetString(2), createdBy = reader.GetString(3), createdAt = reader.GetFieldValue<DateTimeOffset>(4), completedAt = reader.IsDBNull(5) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(5), publicationYear = reader.IsDBNull(6) ? (int?)null : reader.GetInt32(6), publicationQuarter = reader.IsDBNull(7) ? (short?)null : reader.GetInt16(7), publishedAt = reader.IsDBNull(8) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(8), withdrawnAt = reader.IsDBNull(9) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(9), supersededAt = reader.IsDBNull(10) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(10), progressCurrent = reader.GetInt64(11), progressTotal = reader.IsDBNull(12) ? (long?)null : reader.GetInt64(12), selectedVoteCount = reader.GetInt64(13), error = (string?)null, progress = reader.IsDBNull(14) ? (JsonElement?)null : reader.GetFieldValue<JsonDocument>(14).RootElement.Clone() });
         return items;
     }
 
     public async Task<object?> GetAsync(Guid id, CancellationToken cancellationToken)
     {
-        const string sql = "SELECT s.id,s.status,s.selection,s.calculation_rule_version,s.created_by_user_id,s.created_at,s.inputs_captured_at,s.completed_at,s.error_message,s.publication_year,s.publication_quarter,s.published_at,s.published_by_user_id,s.withdrawn_at,s.withdrawn_by_user_id,s.superseded_at,s.superseded_by,j.progress_current,j.progress_total,(SELECT count(*) FROM ranking_snapshot_votes v WHERE v.snapshot_id=s.id) FROM ranking_snapshots s JOIN background_jobs j ON j.id=s.id WHERE s.id=@id";
+        const string sql = "SELECT s.id,s.status,s.selection,s.calculation_rule_version,s.created_by_user_id,s.created_at,s.inputs_captured_at,s.completed_at,s.error_message,s.publication_year,s.publication_quarter,s.published_at,s.published_by_user_id,s.withdrawn_at,s.withdrawn_by_user_id,s.superseded_at,s.superseded_by,j.progress_current,j.progress_total,(SELECT count(*) FROM ranking_snapshot_votes v WHERE v.snapshot_id=s.id),(SELECT jsonb_build_object('phase',p.phase,'current',p.current_count,'total',p.total_count,'unit',p.unit,'updatedAt',p.updated_at) FROM job_progress p WHERE p.job_id=s.id) AS progress FROM ranking_snapshots s JOIN background_jobs j ON j.id=s.id WHERE s.id=@id";
         await using var command = dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue("id", id);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
         using var selection = reader.GetFieldValue<JsonDocument>(2);
-        return new { id = reader.GetGuid(0), status = reader.GetString(1), selection = selection.RootElement.Clone(), ruleVersion = reader.GetString(3), createdBy = reader.GetString(4), createdAt = reader.GetFieldValue<DateTimeOffset>(5), inputsCapturedAt = reader.IsDBNull(6) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(6), completedAt = reader.IsDBNull(7) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(7), error = reader.IsDBNull(8) ? null : reader.GetString(8), publicationYear = reader.IsDBNull(9) ? (int?)null : reader.GetInt32(9), publicationQuarter = reader.IsDBNull(10) ? (short?)null : reader.GetInt16(10), publishedAt = reader.IsDBNull(11) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(11), publishedBy = reader.IsDBNull(12) ? null : reader.GetString(12), withdrawnAt = reader.IsDBNull(13) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(13), withdrawnBy = reader.IsDBNull(14) ? null : reader.GetString(14), supersededAt = reader.IsDBNull(15) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(15), supersededBy = reader.IsDBNull(16) ? (Guid?)null : reader.GetGuid(16), progressCurrent = reader.GetInt64(17), progressTotal = reader.IsDBNull(18) ? (long?)null : reader.GetInt64(18), selectedVoteCount = reader.GetInt64(19) };
+        return new { id = reader.GetGuid(0), status = reader.GetString(1), selection = selection.RootElement.Clone(), ruleVersion = reader.GetString(3), createdBy = reader.GetString(4), createdAt = reader.GetFieldValue<DateTimeOffset>(5), inputsCapturedAt = reader.IsDBNull(6) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(6), completedAt = reader.IsDBNull(7) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(7), error = reader.IsDBNull(8) ? null : reader.GetString(8), publicationYear = reader.IsDBNull(9) ? (int?)null : reader.GetInt32(9), publicationQuarter = reader.IsDBNull(10) ? (short?)null : reader.GetInt16(10), publishedAt = reader.IsDBNull(11) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(11), publishedBy = reader.IsDBNull(12) ? null : reader.GetString(12), withdrawnAt = reader.IsDBNull(13) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(13), withdrawnBy = reader.IsDBNull(14) ? null : reader.GetString(14), supersededAt = reader.IsDBNull(15) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(15), supersededBy = reader.IsDBNull(16) ? (Guid?)null : reader.GetGuid(16), progressCurrent = reader.GetInt64(17), progressTotal = reader.IsDBNull(18) ? (long?)null : reader.GetInt64(18), selectedVoteCount = reader.GetInt64(19), progress = reader.IsDBNull(20) ? (JsonElement?)null : reader.GetFieldValue<JsonDocument>(20).RootElement.Clone() };
     }
 
     public async Task<IReadOnlyList<object>> ListResultsAsync(Guid id, int offset, int limit, CancellationToken cancellationToken)
@@ -158,6 +168,8 @@ public sealed class SnapshotService(NpgsqlDataSource dataSource)
         if (year is < 1900 or > 9999 || quarter is < 1 or > 4) return new SnapshotPublicationResult(false, "Publication year or quarter is invalid.");
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using (var serialize = new NpgsqlCommand("SELECT pg_advisory_xact_lock(77492343)", connection, transaction))
+            await serialize.ExecuteNonQueryAsync(cancellationToken);
         string status;
         int? oldYear;
         short? oldQuarter;
@@ -181,30 +193,31 @@ public sealed class SnapshotService(NpgsqlDataSource dataSource)
             if (result is Guid existing) activeId = existing;
         }
         if (activeId.HasValue && !replaceActive) return new SnapshotPublicationResult(false, $"Snapshot {activeId} is already active for {year} Q{quarter}; set replaceActive to replace it.");
-        if (activeId.HasValue)
-        {
-            await using var supersede = new NpgsqlCommand("UPDATE ranking_snapshots SET superseded_at=now(),superseded_by=@newId WHERE id=@oldId", connection, transaction);
-            supersede.Parameters.AddWithValue("newId", id);
-            supersede.Parameters.AddWithValue("oldId", activeId.Value);
-            await supersede.ExecuteNonQueryAsync(cancellationToken);
-            await InsertAuditAsync(connection, transaction, activeId.Value, "SnapshotSuperseded", actorUserId, new { publicationYear = year, publicationQuarter = quarter }, new { supersededBy = id }, correlationId, cancellationToken);
-        }
-        await using (var update = new NpgsqlCommand("UPDATE ranking_snapshots SET publication_year=@year,publication_quarter=@quarter,published_at=now(),published_by_user_id=@actor,withdrawn_at=NULL,withdrawn_by_user_id=NULL,superseded_at=NULL,superseded_by=NULL WHERE id=@id", connection, transaction))
-        {
-            update.Parameters.AddWithValue("year", year);
-            update.Parameters.AddWithValue("quarter", quarter);
-            update.Parameters.AddWithValue("actor", actorUserId);
-            update.Parameters.AddWithValue("id", id);
-            await update.ExecuteNonQueryAsync(cancellationToken);
-        }
-        await InsertAuditAsync(connection, transaction, id, "SnapshotPublished", actorUserId, new { publicationYear = oldYear, publicationQuarter = oldQuarter }, new { publicationYear = year, publicationQuarter = quarter }, correlationId, cancellationToken);
         try
         {
+            if (activeId.HasValue)
+            {
+                await using var supersede = new NpgsqlCommand("UPDATE ranking_snapshots SET superseded_at=now(),superseded_by=@newId WHERE id=@oldId", connection, transaction);
+                supersede.Parameters.AddWithValue("newId", id);
+                supersede.Parameters.AddWithValue("oldId", activeId.Value);
+                await supersede.ExecuteNonQueryAsync(cancellationToken);
+                await InsertAuditAsync(connection, transaction, activeId.Value, "SnapshotSuperseded", actorUserId, new { publicationYear = year, publicationQuarter = quarter }, new { supersededBy = id }, correlationId, cancellationToken);
+            }
+            await using (var update = new NpgsqlCommand("UPDATE ranking_snapshots SET publication_year=@year,publication_quarter=@quarter,published_at=now(),published_by_user_id=@actor,withdrawn_at=NULL,withdrawn_by_user_id=NULL,superseded_at=NULL,superseded_by=NULL WHERE id=@id", connection, transaction))
+            {
+                update.Parameters.AddWithValue("year", year);
+                update.Parameters.AddWithValue("quarter", quarter);
+                update.Parameters.AddWithValue("actor", actorUserId);
+                update.Parameters.AddWithValue("id", id);
+                await update.ExecuteNonQueryAsync(cancellationToken);
+            }
+            await InsertAuditAsync(connection, transaction, id, "SnapshotPublished", actorUserId, new { publicationYear = oldYear, publicationQuarter = oldQuarter }, new { publicationYear = year, publicationQuarter = quarter }, correlationId, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return new SnapshotPublicationResult(true, null);
         }
         catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.UniqueViolation && exception.ConstraintName == "ux_active_snapshot_publication_period")
         {
+            await transaction.RollbackAsync(cancellationToken);
             return new SnapshotPublicationResult(false, $"Another snapshot was published for {year} Q{quarter} at the same time. Refresh and try again.");
         }
     }
@@ -213,6 +226,8 @@ public sealed class SnapshotService(NpgsqlDataSource dataSource)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using (var serialize = new NpgsqlCommand("SELECT pg_advisory_xact_lock(77492343)", connection, transaction))
+            await serialize.ExecuteNonQueryAsync(cancellationToken);
         int year;
         short quarter;
         await using (var read = new NpgsqlCommand("SELECT publication_year,publication_quarter FROM ranking_snapshots WHERE id=@id AND published_at IS NOT NULL AND withdrawn_at IS NULL AND superseded_at IS NULL FOR UPDATE", connection, transaction))

@@ -10,6 +10,7 @@ export type { ImportDetails } from './models/import-details';
 export type { ImportRecord } from './models/import-record';
 export type { ImportReport } from './models/import-report';
 export type { ImportRow } from './models/import-row';
+export type { JobProgress } from './models/job-progress';
 export type { Metadata } from './models/metadata';
 export type { Position } from './models/position';
 export type { PositionResult } from './models/position-result';

@@ -1,12 +1,13 @@
 using System.Data;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Npgsql;
 using NpgsqlTypes;
 
 namespace Meridian.Infrastructure;
 
-public sealed record PositionUpdateRequest(string? Stance, int Weight, string? Note);
-public sealed record PositionWriteResult(bool Updated, bool NotFound, string? Error, object? Position);
+public sealed record PositionUpdateRequest(string? Stance, int Weight, string? Note, [property: JsonRequired] long? ExpectedVersionId = null);
+public sealed record PositionWriteResult(bool Updated, bool NotFound, string? Error, object? Position, bool Stale = false);
 
 public sealed class VoteService(NpgsqlDataSource dataSource)
 {
@@ -47,20 +48,50 @@ public sealed class VoteService(NpgsqlDataSource dataSource)
             pendingConflicts = reader.GetInt64(12)
         };
         await reader.CloseAsync();
-        await using var countryVoteCommand = dataSource.CreateCommand("SELECT cv.country_code,ms.country_name,cvv.ballot,cvv.id,cvv.source_import_id FROM country_votes cv JOIN member_states ms ON ms.country_code=cv.country_code JOIN country_vote_versions cvv ON cvv.id=cv.current_version_id WHERE cv.assembly_vote_id=@key ORDER BY ms.country_name,cv.country_code");
+        await using var countryVoteCommand = dataSource.CreateCommand("SELECT cv.country_code,ms.country_name,cvv.ballot,cvv.id,cvv.source_import_id,i.file_name,u.display_name,i.created_at FROM country_votes cv JOIN member_states ms ON ms.country_code=cv.country_code JOIN country_vote_versions cvv ON cvv.id=cv.current_version_id JOIN imports i ON i.id=cvv.source_import_id LEFT JOIN app_users u ON u.user_id=i.uploaded_by_user_id WHERE cv.assembly_vote_id=@key ORDER BY ms.country_name,cv.country_code");
         countryVoteCommand.Parameters.AddWithValue("key", voteId);
         await using var countryVoteReader = await countryVoteCommand.ExecuteReaderAsync(cancellationToken);
         var countryVotes = new List<object>();
         while (await countryVoteReader.ReadAsync(cancellationToken))
-            countryVotes.Add(new { countryCode = countryVoteReader.GetString(0).Trim(), countryName = countryVoteReader.GetString(1), ballot = countryVoteReader.GetString(2), versionId = countryVoteReader.GetInt64(3), sourceImportId = countryVoteReader.GetGuid(4) });
+            countryVotes.Add(new { countryCode = countryVoteReader.GetString(0).Trim(), countryName = countryVoteReader.GetString(1), ballot = countryVoteReader.GetString(2), versionId = countryVoteReader.GetInt64(3), sourceImportId = countryVoteReader.GetGuid(4), sourceFileName = countryVoteReader.GetString(5), uploadedBy = countryVoteReader.IsDBNull(6) ? null : countryVoteReader.GetString(6), uploadedAt = countryVoteReader.GetFieldValue<DateTimeOffset>(7) });
         await countryVoteReader.CloseAsync();
-        await using var history = dataSource.CreateCommand("SELECT action,actor_user_id,old_value,new_value,note,correlation_id,occurred_at FROM audit_events WHERE (entity_key=@key AND entity_type IN ('VoteMetadata','Position','CountryVote')) OR (entity_type='CountryVote' AND entity_key LIKE @countryKey) ORDER BY occurred_at,id");
+        // Initial versions carry provenance even for imports created before audit events existed.
+        // Later versions already have a conflict-decision audit and are not duplicated here.
+        const string historySql = """
+            WITH events AS (
+                SELECT action,actor_user_id,old_value,new_value,note,correlation_id,occurred_at,source_import_id,entity_key
+                FROM audit_events WHERE (entity_key=@key AND entity_type IN ('VoteMetadata','Position'))
+                   OR (entity_type='CountryVote' AND entity_key=@key||':'||right(entity_key,3))
+                UNION ALL
+                SELECT 'VoteImported',i.uploaded_by_user_id,NULL::jsonb,
+                    jsonb_build_object('session',v.session,'voteDate',v.vote_date,'title',v.resolution_title),
+                    NULL,NULL,v.created_at,v.source_import_id,v.assembly_vote_id
+                FROM vote_versions v JOIN imports i ON i.id=v.source_import_id
+                WHERE v.assembly_vote_id=@key AND NOT EXISTS (SELECT 1 FROM vote_versions earlier WHERE earlier.assembly_vote_id=v.assembly_vote_id AND earlier.id<v.id)
+                UNION ALL
+                SELECT 'CountryBallotImported',i.uploaded_by_user_id,NULL::jsonb,
+                    jsonb_build_object('countryCode',trim(v.country_code),'countryName',v.country_name,'ballot',v.ballot),
+                    NULL,NULL,v.created_at,v.source_import_id,v.assembly_vote_id||':'||trim(v.country_code)
+                FROM country_vote_versions v JOIN imports i ON i.id=v.source_import_id
+                WHERE v.assembly_vote_id=@key AND NOT EXISTS (SELECT 1 FROM country_vote_versions earlier WHERE earlier.assembly_vote_id=v.assembly_vote_id AND earlier.country_code=v.country_code AND earlier.id<v.id)
+                UNION ALL
+                SELECT 'ImportUnchanged',i.uploaded_by_user_id,NULL::jsonb,
+                    jsonb_build_object('unchangedRows',count(*)),NULL,NULL,i.completed_at,i.id,@key
+                FROM import_staging_rows r JOIN imports i ON i.id=r.import_id
+                WHERE r.normalized_values->>'assembly_vote_id'=@key AND r.classification='NoChange'
+                GROUP BY i.id
+            )
+            SELECT e.action,COALESCE(u.display_name,e.actor_user_id,'Unknown'),e.old_value,e.new_value,e.note,e.correlation_id,e.occurred_at,
+                   e.source_import_id,i.file_name,e.entity_key
+            FROM events e LEFT JOIN imports i ON i.id=e.source_import_id LEFT JOIN app_users u ON u.user_id=e.actor_user_id
+            ORDER BY e.occurred_at,e.entity_key,e.action
+            """;
+        await using var history = dataSource.CreateCommand(historySql);
         history.Parameters.AddWithValue("key", voteId);
-        history.Parameters.AddWithValue("countryKey", $"{voteId}:%");
         await using var historyReader = await history.ExecuteReaderAsync(cancellationToken);
         var events = new List<object>();
         while (await historyReader.ReadAsync(cancellationToken))
-            events.Add(new { action = historyReader.GetString(0), actor = historyReader.GetString(1), oldValue = historyReader.IsDBNull(2) ? (JsonElement?)null : historyReader.GetFieldValue<JsonDocument>(2).RootElement.Clone(), newValue = historyReader.IsDBNull(3) ? (JsonElement?)null : historyReader.GetFieldValue<JsonDocument>(3).RootElement.Clone(), note = historyReader.IsDBNull(4) ? null : historyReader.GetString(4), correlationId = historyReader.IsDBNull(5) ? null : historyReader.GetString(5), occurredAt = historyReader.GetFieldValue<DateTimeOffset>(6) });
+            events.Add(new { action = historyReader.GetString(0), actor = historyReader.GetString(1), oldValue = historyReader.IsDBNull(2) ? (JsonElement?)null : historyReader.GetFieldValue<JsonDocument>(2).RootElement.Clone(), newValue = historyReader.IsDBNull(3) ? (JsonElement?)null : historyReader.GetFieldValue<JsonDocument>(3).RootElement.Clone(), note = historyReader.IsDBNull(4) ? null : historyReader.GetString(4), correlationId = historyReader.IsDBNull(5) ? null : historyReader.GetString(5), occurredAt = historyReader.GetFieldValue<DateTimeOffset>(6), sourceImportId = historyReader.IsDBNull(7) ? (Guid?)null : historyReader.GetGuid(7), sourceFileName = historyReader.IsDBNull(8) ? null : historyReader.GetString(8), entityKey = historyReader.GetString(9) });
         return new { vote = result, countryVotes, history = events };
     }
 
@@ -93,6 +124,8 @@ public sealed class VoteService(NpgsqlDataSource dataSource)
             oldStance = reader.IsDBNull(1) ? null : reader.GetString(1);
             oldWeight = reader.IsDBNull(2) ? null : reader.GetInt16(2);
         }
+        if (request.ExpectedVersionId != oldVersionId)
+            return new PositionWriteResult(false, false, "The position changed since you opened it. Review the current value before saving again.", new { versionId = oldVersionId, stance = oldStance, weight = oldWeight }, true);
         long newVersionId;
         await using (var insert = new NpgsqlCommand("INSERT INTO position_versions(assembly_vote_id,stance,weight,actor_user_id,note) VALUES (@id,@stance,@weight,@actor,@note) RETURNING id", connection, transaction))
         {

@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
@@ -7,22 +6,16 @@ namespace Meridian.Infrastructure;
 
 public sealed record CreatedImport(Guid ImportId, string Status, Guid? OriginalImportId);
 
-public sealed class ImportService(NpgsqlDataSource dataSource, string? configuredStoragePath)
+public sealed class ImportService(NpgsqlDataSource dataSource, IImportFileStorage fileStorage)
 {
     public async Task<CreatedImport> CreateAsync(string fileName, string correlationId, string uploadedByUserId, Stream source, CancellationToken cancellationToken)
     {
         if (!string.Equals(Path.GetExtension(fileName), ".csv", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Only .csv files are accepted.");
         var importId = Guid.NewGuid();
-        var storageRoot = configuredStoragePath;
-        if (string.IsNullOrWhiteSpace(storageRoot)) storageRoot = Path.Combine(AppContext.BaseDirectory, "uploads");
-        Directory.CreateDirectory(storageRoot);
-        var storedPath = Path.Combine(storageRoot, $"{importId:N}.csv");
-        await using (var output = new FileStream(storedPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
-            await source.CopyToAsync(output, cancellationToken);
-        string hash;
-        await using (var hashStream = File.OpenRead(storedPath))
-            hash = Convert.ToHexString(await SHA256.HashDataAsync(hashStream, cancellationToken)).ToLowerInvariant();
+        var storedFile = await fileStorage.SaveAsync(importId, source, cancellationToken);
+        var storedPath = storedFile.Key;
+        var hash = storedFile.Sha256;
         var safeName = Path.GetFileName(fileName);
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -66,20 +59,20 @@ public sealed class ImportService(NpgsqlDataSource dataSource, string? configure
 
     public async Task<IReadOnlyList<object>> ListAsync(int offset, int limit, CancellationToken cancellationToken)
     {
-        const string sql = "SELECT i.id,i.file_name,i.status,i.rows_processed,i.rows_total,i.created_at,i.completed_at,i.original_import_id,u.display_name FROM imports i LEFT JOIN app_users u ON u.user_id=i.uploaded_by_user_id ORDER BY i.created_at DESC,i.id LIMIT @limit OFFSET @offset";
+        const string sql = "SELECT i.id,i.file_name,i.status,i.rows_processed,i.rows_total,i.created_at,i.completed_at,i.original_import_id,u.display_name,(SELECT jsonb_build_object('phase',p.phase,'current',p.current_count,'total',p.total_count,'unit',p.unit,'updatedAt',p.updated_at) FROM job_progress p JOIN background_jobs j ON j.id=p.job_id WHERE j.job_type='csv_import' AND j.payload->>'importId'=i.id::text LIMIT 1) AS progress FROM imports i LEFT JOIN app_users u ON u.user_id=i.uploaded_by_user_id ORDER BY i.created_at DESC,i.id LIMIT @limit OFFSET @offset";
         await using var command = dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue("limit", Math.Clamp(limit, 1, 200));
         command.Parameters.AddWithValue("offset", Math.Max(0, offset));
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var imports = new List<object>();
         while (await reader.ReadAsync(cancellationToken))
-            imports.Add(new { id = reader.GetGuid(0), fileName = reader.GetString(1), status = reader.GetString(2), rowsProcessed = reader.GetInt64(3), rowsTotal = reader.IsDBNull(4) ? (long?)null : reader.GetInt64(4), createdAt = reader.GetFieldValue<DateTimeOffset>(5), completedAt = reader.IsDBNull(6) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(6), originalImportId = reader.IsDBNull(7) ? (Guid?)null : reader.GetGuid(7), uploadedBy = reader.IsDBNull(8) ? null : reader.GetString(8) });
+            imports.Add(new { id = reader.GetGuid(0), fileName = reader.GetString(1), status = reader.GetString(2), rowsProcessed = reader.GetInt64(3), rowsTotal = reader.IsDBNull(4) ? (long?)null : reader.GetInt64(4), createdAt = reader.GetFieldValue<DateTimeOffset>(5), completedAt = reader.IsDBNull(6) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(6), originalImportId = reader.IsDBNull(7) ? (Guid?)null : reader.GetGuid(7), uploadedBy = reader.IsDBNull(8) ? null : reader.GetString(8), progress = reader.IsDBNull(9) ? (System.Text.Json.JsonElement?)null : reader.GetFieldValue<JsonDocument>(9).RootElement.Clone() });
         return imports;
     }
 
     public async Task<IReadOnlyList<object>> ListRowsAsync(Guid id, long afterRow, int limit, string? classification, CancellationToken cancellationToken)
     {
-        const string sql = "SELECT row_number,classification,reason,raw_values FROM import_staging_rows WHERE import_id=@id AND row_number>@after AND (@classification IS NULL OR classification=@classification) ORDER BY row_number LIMIT @limit";
+        const string sql = "SELECT row_number,classification,reason,raw_values,normalized_values,normalizations FROM import_staging_rows WHERE import_id=@id AND row_number>@after AND (@classification IS NULL OR classification=@classification) ORDER BY row_number LIMIT @limit";
         await using var command = dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue("id", id);
         command.Parameters.AddWithValue("after", afterRow);
@@ -90,16 +83,16 @@ public sealed class ImportService(NpgsqlDataSource dataSource, string? configure
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var rows = new List<object>();
         while (await reader.ReadAsync(cancellationToken))
-            rows.Add(new { rowNumber = reader.GetInt64(0), classification = reader.IsDBNull(1) ? null : reader.GetString(1), reason = reader.IsDBNull(2) ? null : reader.GetString(2), values = reader.GetFieldValue<JsonDocument>(3).RootElement.Clone() });
+            rows.Add(new { rowNumber = reader.GetInt64(0), classification = reader.IsDBNull(1) ? null : reader.GetString(1), reason = reader.IsDBNull(2) ? null : reader.GetString(2), values = reader.GetFieldValue<JsonDocument>(3).RootElement.Clone(), normalizedValues = reader.GetFieldValue<JsonDocument>(4).RootElement.Clone(), normalizations = reader.GetFieldValue<JsonDocument>(5).RootElement.Clone() });
         return rows;
     }
     public async Task<object?> GetAsync(Guid id, CancellationToken cancellationToken)
     {
-        const string sql = "SELECT i.id,i.file_name,i.status,i.rows_processed,i.rows_total,i.created_at,i.completed_at,i.original_import_id,i.report,u.display_name FROM imports i LEFT JOIN app_users u ON u.user_id=i.uploaded_by_user_id WHERE i.id=@id";
+        const string sql = "SELECT i.id,i.file_name,i.status,i.rows_processed,i.rows_total,i.created_at,i.completed_at,i.original_import_id,i.report,u.display_name,(SELECT jsonb_build_object('phase',p.phase,'current',p.current_count,'total',p.total_count,'unit',p.unit,'updatedAt',p.updated_at) FROM job_progress p JOIN background_jobs j ON j.id=p.job_id WHERE j.job_type='csv_import' AND j.payload->>'importId'=i.id::text LIMIT 1) AS progress FROM imports i LEFT JOIN app_users u ON u.user_id=i.uploaded_by_user_id WHERE i.id=@id";
         await using var command = dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue("id", id);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
-        return new { id = reader.GetGuid(0), fileName = reader.GetString(1), status = reader.GetString(2), rowsProcessed = reader.GetInt64(3), rowsTotal = reader.IsDBNull(4) ? (long?)null : reader.GetInt64(4), createdAt = reader.GetFieldValue<DateTimeOffset>(5), completedAt = reader.IsDBNull(6) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(6), originalImportId = reader.IsDBNull(7) ? (Guid?)null : reader.GetGuid(7), report = reader.IsDBNull(8) ? (object?)null : reader.GetFieldValue<JsonDocument>(8).RootElement.Clone(), uploadedBy = reader.IsDBNull(9) ? null : reader.GetString(9) };
+        return new { id = reader.GetGuid(0), fileName = reader.GetString(1), status = reader.GetString(2), rowsProcessed = reader.GetInt64(3), rowsTotal = reader.IsDBNull(4) ? (long?)null : reader.GetInt64(4), createdAt = reader.GetFieldValue<DateTimeOffset>(5), completedAt = reader.IsDBNull(6) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(6), originalImportId = reader.IsDBNull(7) ? (Guid?)null : reader.GetGuid(7), report = reader.IsDBNull(8) ? (object?)null : reader.GetFieldValue<JsonDocument>(8).RootElement.Clone(), uploadedBy = reader.IsDBNull(9) ? null : reader.GetString(9), progress = reader.IsDBNull(10) ? (System.Text.Json.JsonElement?)null : reader.GetFieldValue<JsonDocument>(10).RootElement.Clone() };
     }
 }

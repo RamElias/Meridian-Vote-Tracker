@@ -19,7 +19,17 @@ if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 docker compose up -d --build
 ```
 
-The Angular app publishes at <http://localhost:4200> and proxies API requests to the backend at <http://localhost:8080>. Health is at `/health`, metadata at `/api/v1/meta`, and the OpenAPI document at `/openapi/v1.json`. Set `ConnectionStrings__Meridian` to use another PostgreSQL server, including Azure Database for PostgreSQL. The app does not contain connection strings or credentials. Local uploads are configured with `Storage__LocalPath`; Azure Blob and Application Insights can be enabled through provider configuration later.
+The Angular app publishes at <http://localhost:4200> and proxies API requests to the backend at <http://localhost:8080>. Health is at `/health`, metadata at `/api/v1/meta`, and the OpenAPI document at `/openapi/v1.json`. Docker Compose runs the application locally. PostgreSQL and import-file storage default to local services; telemetry export is disabled until configured; Azure resources are optional external services selected by configuration.
+
+## Azure Key Vault
+
+The API and Worker optionally load configuration from Azure Key Vault when `AZURE_KEY_VAULT_URI` is set to the vault's HTTPS URI. Both processes use `DefaultAzureCredential`. For a workload that runs in Azure, use a system-assigned or user-assigned managed identity and grant it the **Key Vault Secrets User** role. For local Docker Compose, use a local development service principal with the required access and put its `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET` in the ignored `.env` file. The bootstrap credential must be supplied outside the vault because it is needed to open the vault. Leave the vault URI unset to use only local settings.
+
+Store the PostgreSQL connection string as a Key Vault secret named `ConnectionStrings--Meridian`; the `--` separator maps to the .NET configuration key `ConnectionStrings:Meridian`. A Key Vault value overrides Compose's default local PostgreSQL connection. Alternatively, set `MERIDIAN_CONNECTION_STRING` in `.env` to use an external PostgreSQL server directly. For Azure Database for PostgreSQL, use its required TLS settings and grant the configured database user access to the schema. The local PostgreSQL container remains available for the default development setup.
+
+To store original imports in Azure Blob, set `STORAGE_PROVIDER=AzureBlob`, `AZURE_BLOB_SERVICE_URI=https://<account>.blob.core.windows.net`, and (if needed) `AZURE_BLOB_CONTAINER`. Create the container first and grant the local service principal **Storage Blob Data Contributor** on it. Alternatively, store the storage connection string in Key Vault as `Storage--AzureBlob--ConnectionString`. API and Worker share the same provider configuration, so both can upload/read the same files. Keep `STORAGE_PROVIDER=Local` to use the persistent Compose volume. Keep this provider stable for a database's import history; changing it requires migrating stored files and their storage keys.
+
+Set `APPLICATIONINSIGHTS_CONNECTION_STRING` to enable Application Insights telemetry for both API and Worker, or store it in Key Vault as `ApplicationInsights--ConnectionString`. When it is empty, telemetry export stays disabled. Resource credentials and connection strings must remain in ignored `.env` or Key Vault, never in source control.
 
 The principal API flows are:
 
@@ -82,3 +92,33 @@ npm ci
 npm run build
 npm test -- --watch=false
 ```
+
+
+## Repeatable PostgreSQL and HTTP regression suite
+
+The suite creates a uniquely named temporary database, applies all migrations, runs the real processors and a real HTTP API, then drops only that temporary database. Its database account needs CREATEDB permission. It covers interleaved/overlapping/duplicate imports, normalization, membership boundaries, deferred-date reports, concurrent conflict decisions, stale positions, API roles, OpenAPI responses, snapshot metrics/immutability, concurrent publication and recovery after cancellation.
+
+With Docker only (no host .NET SDK required):
+
+```powershell
+docker compose -p meridian-tests -f docker-compose.tests.yml up --abort-on-container-exit --exit-code-from integration-tests
+docker compose -p meridian-tests -f docker-compose.tests.yml down -v
+```
+
+This uses an isolated PostgreSQL service with no published port or application volume. The default scale case calculates 975,000 contributions (6,500 votes × 150 countries). Set `MERIDIAN_TEST_ARGS=--quick` for the smaller 101-vote case.
+
+With the .NET 8 SDK and `MERIDIAN_TEST_CONNECTION_STRING` pointing to a disposable PostgreSQL server:
+
+```powershell
+dotnet build Meridian.VoteTracker.sln
+dotnet run --no-build --project tests/Meridian.IntegrationTests
+dotnet run --no-build --project tests/Meridian.IntegrationTests -- --large
+# Optional measurement using the original assignment files:
+dotnet run --no-build --project tests/Meridian.IntegrationTests -- --historic ../Assignment-DotNet/assembly_historic.csv ../Assignment-DotNet/member_states.csv
+```
+
+The API contract is `src/Meridian.Api/openapi.json`. After changing it, run `npm run generate:api` and `npm run check:api` in `src/Meridian.Web`. The integration suite validates actual HTTP response shapes against this contract. Angular tests include late-response protection when switching contribution country or snapshot.
+
+Progress is reported as Reading, Staging, Validating, Promoting or Calculating, with a phase counter and unit. Internal errors show a safe message and correlation ID; the exception and correlation scope remain in JSON console logs. For position writes, send `expectedVersionId` (null for the first position); stale versions receive HTTP 409 and `currentPosition`. Unknown explicit snapshot vote IDs receive HTTP 422 with `unknownVoteIds`.
+
+See `VERIFICATION.md` for the performed checks and their limits. Azure provider code is implemented, but live Key Vault, Blob, telemetry ingestion and Azure PostgreSQL connectivity require environment credentials and have not been verified against the supplied Azure account.

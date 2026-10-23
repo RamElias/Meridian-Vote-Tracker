@@ -5,7 +5,9 @@ export interface ImportReport {
   conflicts?: {
 [key: string]: number;
 };
+  error?: string;
   flaggedRows?: number;
+  normalizedRows?: number;
   summary?: {
 [key: string]: number;
 };

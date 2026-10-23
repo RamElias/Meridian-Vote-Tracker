@@ -1,30 +1,59 @@
 using Meridian.Infrastructure;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Logging.AddJsonConsole(options => options.IncludeScopes = true);
+builder.Configuration.AddKeyVaultIfConfigured(builder.Configuration);
+builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options => options.MultipartBodyLengthLimit = 150 * 1024 * 1024);
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 150 * 1024 * 1024);
 var connectionString = builder.Configuration.GetConnectionString("Meridian")
     ?? throw new InvalidOperationException("ConnectionStrings:Meridian is required.");
 builder.Services.AddSingleton<NpgsqlDataSource>(_ => NpgsqlDataSource.Create(connectionString));
+builder.Services.AddSingleton<JobProgressReporter>();
 builder.Services.AddSingleton<CsvImportValidator>();
 builder.Services.AddSingleton<DemoUserService>();
 builder.Services.AddSingleton<ConflictService>();
 builder.Services.AddSingleton<VoteService>();
 builder.Services.AddSingleton<SnapshotService>();
-builder.Services.AddSingleton<ImportService>(provider => new ImportService(provider.GetRequiredService<NpgsqlDataSource>(), builder.Configuration["Storage:LocalPath"]));
+builder.Services.AddSingleton<IImportFileStorage>(_ => ImportFileStorageRegistration.Create(builder.Configuration));
+builder.Services.AddSingleton<ImportService>();
 builder.Services.AddSingleton<DatabaseBootstrapper>(provider => new DatabaseBootstrapper(connectionString, provider.GetRequiredService<ILogger<DatabaseBootstrapper>>()));
-builder.Services.AddProblemDetails();
+builder.Services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
+builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = context =>
+{
+    context.ProblemDetails.Extensions["correlationId"] = context.HttpContext.TraceIdentifier;
+    if (context.ProblemDetails.Status >= 500)
+    {
+        context.ProblemDetails.Title = "The request could not be completed.";
+        context.ProblemDetails.Detail = "An internal error occurred. Use the correlation ID when reporting this problem.";
+    }
+});
+if (!string.IsNullOrWhiteSpace(builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]) || !string.IsNullOrWhiteSpace(builder.Configuration["ApplicationInsights:ConnectionString"]))
+    builder.Services.AddApplicationInsightsTelemetry();
 var app = builder.Build();
 app.Use(async (context, next) =>
 {
     var correlationId = context.Request.Headers["X-Correlation-ID"].FirstOrDefault();
     if (string.IsNullOrWhiteSpace(correlationId) || correlationId.Length > 128 || correlationId.Any(ch => !char.IsAsciiLetterOrDigit(ch) && ch is not ('.' or '_' or '-'))) correlationId = Guid.NewGuid().ToString("N");
     context.TraceIdentifier = correlationId;
-    context.Response.Headers["X-Correlation-ID"] = correlationId;
+    context.Response.OnStarting(() =>
+    {
+        context.Response.Headers["X-Correlation-ID"] = correlationId;
+        return Task.CompletedTask;
+    });
     using (app.Logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId }))
         await next();
 });
-app.UseExceptionHandler();
+app.UseExceptionHandler(errors => errors.Run(async context =>
+{
+    var error = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+    var badRequest = error is BadHttpRequestException or System.Text.Json.JsonException;
+    await Results.Problem(title: badRequest ? "Invalid request" : "The request could not be completed.",
+        detail: badRequest ? "Check the request fields and JSON format." : "An internal error occurred. Use the correlation ID when reporting this problem.",
+        statusCode: badRequest ? StatusCodes.Status400BadRequest : StatusCodes.Status500InternalServerError,
+        extensions: new Dictionary<string,object?> { ["correlationId"] = context.TraceIdentifier }).ExecuteAsync(context);
+}));
 app.Use(async (context, next) =>
 {
     if (context.Request.Path.StartsWithSegments("/api/v1") && !context.Request.Path.Equals("/api/v1/meta", StringComparison.OrdinalIgnoreCase))
@@ -91,6 +120,7 @@ app.MapPut("/api/v1/vote/position", async (string voteId, PositionUpdateRequest 
     if (user.Role != "Admin") return Results.Problem(title: "Administrator required", statusCode: StatusCodes.Status403Forbidden);
     var result = await votes.SetPositionAsync(voteId, request, user.UserId, context.TraceIdentifier, ct);
     if (result.NotFound) return Results.Problem(title: "Vote not found", statusCode: StatusCodes.Status404NotFound);
+    if (result.Stale) return Results.Problem(title: "Position changed", detail: result.Error, statusCode: StatusCodes.Status409Conflict, extensions: new Dictionary<string, object?> { ["currentPosition"] = result.Position });
     if (!result.Updated) return Results.Problem(title: "Invalid position", detail: result.Error, statusCode: StatusCodes.Status400BadRequest);
     return Results.Ok(result.Position);
 }).WithName("SetVotePosition");
@@ -100,7 +130,7 @@ app.MapPost("/api/v1/snapshots", async (SnapshotRequest request, HttpContext con
     var result = await snapshots.CreateAsync(request, user.UserId, context.TraceIdentifier, ct);
     if (!result.Created)
     {
-        var extensions = result.VotesWithoutPosition is null ? null : new Dictionary<string, object?> { ["votesWithoutPosition"] = result.VotesWithoutPosition };
+        var extensions = new Dictionary<string, object?> { ["votesWithoutPosition"] = result.VotesWithoutPosition, ["unknownVoteIds"] = result.UnknownVoteIds };
         return Results.Problem(title: "Snapshot selection is invalid", detail: result.Error, statusCode: StatusCodes.Status422UnprocessableEntity, extensions: extensions);
     }
     return Results.Accepted($"/api/v1/snapshots/{result.SnapshotId}", new { id = result.SnapshotId, status = "Queued", selectedVoteCount = result.SelectedVoteCount });

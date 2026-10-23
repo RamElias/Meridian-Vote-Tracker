@@ -7,7 +7,8 @@
     "build": "ng build",
     "generate:api": "ng-openapi-gen --input ../Meridian.Api/openapi.json --output src/app/generated-api --services true --promises false --indexFile true",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test"
+    "test": "ng test",
+    "check:api": "node scripts/check-generated-api.mjs"
   },
   "private": true,
   "packageManager": "npm@11.19.1",

@@ -3,6 +3,12 @@
 
 export interface ImportRow {
   classification: string | null;
+  normalizations: {
+[key: string]: any;
+};
+  normalizedValues: {
+[key: string]: any;
+};
   reason: string | null;
   rowNumber: number;
   values: {

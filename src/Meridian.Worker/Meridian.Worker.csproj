@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk.Worker">
   <PropertyGroup><AssemblyName>Meridian.Worker</AssemblyName><UserSecretsId>meridian-vote-tracker-worker</UserSecretsId></PropertyGroup>
-  <ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /><ProjectReference Include="..\Meridian.Infrastructure\Meridian.Infrastructure.csproj" /></ItemGroup>
+  <ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /><PackageReference Include="Microsoft.ApplicationInsights.WorkerService" Version="3.2.0" /><ProjectReference Include="..\Meridian.Infrastructure\Meridian.Infrastructure.csproj" /></ItemGroup>
 </Project>
 

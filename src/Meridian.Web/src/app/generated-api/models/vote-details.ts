@@ -4,13 +4,17 @@
 import { CountryBallot } from '../models/country-ballot';
 import { Position } from '../models/position';
 import { VoteHistory } from '../models/vote-history';
-import { VoteSummary } from '../models/vote-summary';
 export interface VoteDetails {
   countryVotes: Array<CountryBallot>;
   history: Array<VoteHistory>;
-  vote: VoteSummary & {
-'voteVersionId'?: number;
-'publishedAt'?: string;
-'position'?: Position;
+  vote: {
+'voteId': string;
+'session': number;
+'voteDate': string;
+'title': string;
+'pendingConflicts': number;
+'voteVersionId': number;
+'publishedAt': string;
+'position': Position | null;
 };
 }

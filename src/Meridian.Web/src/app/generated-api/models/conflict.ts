@@ -6,9 +6,9 @@ export interface Conflict {
   countryCode: string | null;
   createdAt: string;
   currentSource: {
-'fileName'?: string;
-'uploadedBy'?: string | null;
-'uploadedAt'?: string;
+'fileName': string;
+'uploadedBy': string | null;
+'uploadedAt': string;
 };
   currentValue: {
 [key: string]: any;
@@ -21,7 +21,7 @@ export interface Conflict {
 }) | null;
   id: string;
   proposals: Array<ConflictProposal>;
-  status: string;
+  status: 'Pending' | 'Accepted' | 'Rejected';
   targetType: string;
   voteId: string;
 }

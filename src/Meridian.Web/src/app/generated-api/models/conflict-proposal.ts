@@ -3,11 +3,11 @@
 
 export interface ConflictProposal {
   source: {
-'importId'?: string;
-'fileName'?: string;
-'uploadedBy'?: string | null;
-'uploadedAt'?: string;
-'rowNumber'?: number | null;
+'importId': string;
+'fileName': string;
+'uploadedBy': string | null;
+'uploadedAt': string;
+'rowNumber': number | null;
 };
   value: {
 [key: string]: any;

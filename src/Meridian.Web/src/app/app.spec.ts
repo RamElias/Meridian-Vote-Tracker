@@ -37,7 +37,7 @@ describe('App', () => {
 
   it('counts queued and completed imports independently', () => {
     const fixture = TestBed.createComponent(App);
-    const app = fixture.componentInstance;
+    const app = fixture.componentInstance.workspace;
     app.imports.set([
       { id: '1', fileName: 'queued.csv', status: 'Queued', rowsProcessed: 0, rowsTotal: 5, createdAt: '', completedAt: null, originalImportId: null, uploadedBy: null },
       { id: '2', fileName: 'done.csv', status: 'Completed', rowsProcessed: 5, rowsTotal: 5, createdAt: '', completedAt: '', originalImportId: null, uploadedBy: null },
@@ -49,11 +49,11 @@ describe('App', () => {
   });
 
   it('distinguishes active, withdrawn, and superseded publications', () => {
-    const app = TestBed.createComponent(App).componentInstance;
+    const app = TestBed.createComponent(App).componentInstance.workspace;
     const base = {
       id: 'snapshot', status: 'Completed', ruleVersion: 'alignment-v1', createdBy: 'lana', createdAt: '', completedAt: '',
       publicationYear: 2024, publicationQuarter: 1, publishedAt: '2026-10-21T12:00:00Z', withdrawnAt: null, supersededAt: null,
-      progressCurrent: 1, progressTotal: 1, selectedVoteCount: 1,
+      progressCurrent: 1, progressTotal: 1, selectedVoteCount: 1, error: null,
     };
 
     expect(app.snapshotStatus(base)).toBe('Published');

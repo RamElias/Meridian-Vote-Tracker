@@ -5,8 +5,11 @@ export interface VoteHistory {
   action: string;
   actor: string;
   correlationId: string | null;
+  entityKey: string;
   newValue: any | null;
   note: string | null;
   occurredAt: string;
   oldValue: any | null;
+  sourceFileName: string | null;
+  sourceImportId: string | null;
 }

@@ -5,6 +5,9 @@ export interface CountryBallot {
   ballot: string;
   countryCode: string;
   countryName: string;
+  sourceFileName: string;
   sourceImportId: string;
+  uploadedAt: string;
+  uploadedBy: string | null;
   versionId: number;
 }

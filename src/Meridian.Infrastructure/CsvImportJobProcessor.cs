@@ -5,7 +5,7 @@ using NpgsqlTypes;
 
 namespace Meridian.Infrastructure;
 
-public sealed class CsvImportJobProcessor(NpgsqlDataSource dataSource, CsvImportValidator validator, ILogger<CsvImportJobProcessor> logger)
+public sealed class CsvImportJobProcessor(NpgsqlDataSource dataSource, CsvImportValidator validator, IImportFileStorage fileStorage, JobProgressReporter progress, ILogger<CsvImportJobProcessor> logger)
 {
     private readonly record struct ClaimedJob(Guid JobId, Guid ImportId, string CorrelationId);
     private static readonly string[] RequiredHeaders = ["assembly_vote_id", "session", "vote_date", "resolution_title", "country_code", "country_name", "ballot", "published_at"];
@@ -19,32 +19,25 @@ public sealed class CsvImportJobProcessor(NpgsqlDataSource dataSource, CsvImport
         {
             await ResetStagingForRetryAsync(job.Value.ImportId, job.Value.JobId, cancellationToken);
             var import = await GetImportFileAsync(job.Value.ImportId, cancellationToken);
-            var totalRows = await CountRowsAsync(import.Path, cancellationToken);
+            await progress.ReportAsync(job.Value.JobId,"Reading",0,null,cancellationToken,true);
+            var totalRows = await CountRowsAsync(job.Value.JobId, import.Path, cancellationToken);
+            await progress.ReportAsync(job.Value.JobId,"Staging",0,totalRows,cancellationToken,true);
             await SetTotalAsync(job.Value.JobId, job.Value.ImportId, totalRows, cancellationToken);
             var stagedRows = await StageAsync(job.Value.JobId, job.Value.ImportId, import.Path, cancellationToken);
-            using var report = await validator.ValidateAndPromoteAsync(job.Value.ImportId, cancellationToken);
-            await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
-            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-            await using (var updateImport = new NpgsqlCommand("UPDATE imports SET status='Completed',rows_total=@count,rows_processed=@count,report=@report,completed_at=now() WHERE id=@id", connection, transaction))
-            {
-                updateImport.Parameters.AddWithValue("count", stagedRows);
-                updateImport.Parameters.AddWithValue("report", NpgsqlDbType.Jsonb, report.RootElement.GetRawText());
-                updateImport.Parameters.AddWithValue("id", job.Value.ImportId);
-                await updateImport.ExecuteNonQueryAsync(cancellationToken);
-            }
-            await using (var updateJob = new NpgsqlCommand("UPDATE background_jobs SET status='Completed',progress_current=@count,progress_total=@count,completed_at=now() WHERE id=@id", connection, transaction))
-            {
-                updateJob.Parameters.AddWithValue("count", stagedRows);
-                updateJob.Parameters.AddWithValue("id", job.Value.JobId);
-                await updateJob.ExecuteNonQueryAsync(cancellationToken);
-            }
-            await transaction.CommitAsync(cancellationToken);
+            await validator.ValidateAndPromoteAsync(job.Value.ImportId, job.Value.JobId, cancellationToken);
             logger.LogInformation("Import {ImportId} staged {RowCount} CSV rows", job.Value.ImportId, stagedRows);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             logger.LogError(exception, "CSV import job {JobId} failed", job.Value.JobId);
-            await MarkFailedAsync(job.Value.JobId, job.Value.ImportId, exception.Message, cancellationToken);
+            await using (var completed = dataSource.CreateCommand("SELECT status='Completed' FROM imports WHERE id=@id"))
+            {
+                completed.Parameters.AddWithValue("id",job.Value.ImportId);
+                if (await completed.ExecuteScalarAsync(cancellationToken) is true) return true;
+            }
+            var message = exception is InvalidDataException ? exception.Message : $"Import processing failed. Reference: {job.Value.CorrelationId}";
+            await MarkFailedAsync(job.Value.JobId, job.Value.ImportId, message, cancellationToken);
+            await progress.ReportAsync(job.Value.JobId,"Failed",0,null,cancellationToken,true);
         }
         return true;
     }
@@ -111,7 +104,7 @@ public sealed class CsvImportJobProcessor(NpgsqlDataSource dataSource, CsvImport
 
     private async Task<long> StageAsync(Guid jobId, Guid importId, string path, CancellationToken cancellationToken)
     {
-        await using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await using var file = await fileStorage.OpenReadAsync(path, cancellationToken);
         using var reader = new StreamReader(file, detectEncodingFromByteOrderMarks: true);
         await using var rows = CsvRecordReader.ReadAsync(reader, cancellationToken).GetAsyncEnumerator(cancellationToken);
         if (!await rows.MoveNextAsync()) throw new InvalidDataException("The CSV file is empty.");
@@ -141,12 +134,16 @@ public sealed class CsvImportJobProcessor(NpgsqlDataSource dataSource, CsvImport
         return staged;
     }
 
-    private static async Task<long> CountRowsAsync(string path, CancellationToken cancellationToken)
+    private async Task<long> CountRowsAsync(Guid jobId, string path, CancellationToken cancellationToken)
     {
-        await using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await using var file = await fileStorage.OpenReadAsync(path, cancellationToken);
         using var reader = new StreamReader(file, detectEncodingFromByteOrderMarks: true);
         long rows = 0;
-        await foreach (var _ in CsvRecordReader.ReadAsync(reader, cancellationToken)) rows++;
+        await foreach (var _ in CsvRecordReader.ReadAsync(reader, cancellationToken))
+        {
+            rows++;
+            if (rows % 5000 == 0) await progress.ReportAsync(jobId,"Reading",Math.Max(0,rows-1),null,cancellationToken);
+        }
         return Math.Max(0, rows - 1);
     }
 
@@ -172,7 +169,7 @@ public sealed class CsvImportJobProcessor(NpgsqlDataSource dataSource, CsvImport
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        await using (var importer = await connection.BeginBinaryImportAsync("COPY import_staging_rows(import_id,row_number,raw_values) FROM STDIN (FORMAT BINARY)", cancellationToken))
+        await using (var importer = await connection.BeginBinaryImportAsync("COPY import_staging_rows(import_id,row_number,raw_values,normalized_values,normalizations) FROM STDIN (FORMAT BINARY)", cancellationToken))
         {
             for (var offset = 0; offset < batch.Count; offset++)
             {
@@ -186,36 +183,40 @@ public sealed class CsvImportJobProcessor(NpgsqlDataSource dataSource, CsvImport
                 await importer.WriteAsync(importId, NpgsqlDbType.Uuid, cancellationToken);
                 await importer.WriteAsync(firstRow + offset, NpgsqlDbType.Bigint, cancellationToken);
                 await importer.WriteAsync(JsonSerializer.Serialize(raw), NpgsqlDbType.Jsonb, cancellationToken);
+                var normalized = CsvValueNormalizer.Normalize(raw);
+                await importer.WriteAsync(JsonSerializer.Serialize(normalized.Values), NpgsqlDbType.Jsonb, cancellationToken);
+                await importer.WriteAsync(JsonSerializer.Serialize(normalized.Changes), NpgsqlDbType.Jsonb, cancellationToken);
             }
             await importer.CompleteAsync(cancellationToken);
         }
-        var progress = progressCurrent;
+        var stagedProgress = progressCurrent;
         await using (var update = new NpgsqlCommand("UPDATE imports SET rows_processed=@progress WHERE id=@id", connection, transaction))
         {
-            update.Parameters.AddWithValue("progress", progress);
+            update.Parameters.AddWithValue("progress", stagedProgress);
             update.Parameters.AddWithValue("id", importId);
             await update.ExecuteNonQueryAsync(cancellationToken);
         }
         await using (var update = new NpgsqlCommand("UPDATE background_jobs SET progress_current=@progress WHERE id=@id", connection, transaction))
         {
-            update.Parameters.AddWithValue("progress", progress);
+            update.Parameters.AddWithValue("progress", stagedProgress);
             update.Parameters.AddWithValue("id", jobId);
             await update.ExecuteNonQueryAsync(cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);
+        await progress.ReportAsync(jobId,"Staging",progressCurrent,null,cancellationToken);
     }
 
     private async Task MarkFailedAsync(Guid jobId, Guid importId, string message, CancellationToken cancellationToken)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        await using (var updateImport = new NpgsqlCommand("UPDATE imports SET status='Failed',report=jsonb_build_object('error',@message),completed_at=now() WHERE id=@id", connection, transaction))
+        await using (var updateImport = new NpgsqlCommand("UPDATE imports SET status='Failed',report=jsonb_build_object('error',@message),completed_at=now() WHERE id=@id AND status<>'Completed'", connection, transaction))
         {
             updateImport.Parameters.AddWithValue("message", message);
             updateImport.Parameters.AddWithValue("id", importId);
             await updateImport.ExecuteNonQueryAsync(cancellationToken);
         }
-        await using (var updateJob = new NpgsqlCommand("UPDATE background_jobs SET status='Failed',error_message=@message,completed_at=now() WHERE id=@id", connection, transaction))
+        await using (var updateJob = new NpgsqlCommand("UPDATE background_jobs SET status='Failed',error_message=@message,completed_at=now() WHERE id=@id AND status<>'Completed'", connection, transaction))
         {
             updateJob.Parameters.AddWithValue("message", message);
             updateJob.Parameters.AddWithValue("id", jobId);

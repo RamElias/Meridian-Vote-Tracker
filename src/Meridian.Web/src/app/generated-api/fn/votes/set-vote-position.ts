@@ -15,6 +15,7 @@ export interface SetVotePosition$Params {
 'stance': 'Y' | 'N';
 'weight': number;
 'note'?: string | null;
+'expectedVersionId': number | null;
 }
 }
 

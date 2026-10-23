@@ -1,0 +1,73 @@
+<section class="page-intro"><div><p>Bring Assembly voting data into the review workflow.</p><div class="metadata-line">Uploads are processed in the background. Progress and row-level results remain available after refresh.</div></div><span class="eyebrow">INGESTION</span></section>
+      <div class="stats-row">
+        <article class="stat-card"><span class="stat-label">TOTAL IMPORTS</span><strong>{{ imports().length }}</strong><small>Most recent first</small></article>
+        <article class="stat-card"><span class="stat-label">PROCESSING</span><strong>{{ processingCount() }}</strong><small>Queued or running</small></article>
+        <article class="stat-card"><span class="stat-label">COMPLETED</span><strong>{{ completedImportCount() }}</strong><small>Ready for review</small></article>
+        <article class="stat-card"><span class="stat-label">OPEN CONFLICTS</span><strong>{{ conflicts().length }}</strong><small>Need a human decision</small></article>
+      </div>
+      <div class="content-grid import-grid">
+        <section class="panel upload-panel">
+          <div class="panel-heading"><div><span class="section-kicker">NEW UPLOAD</span><h2>Import a CSV file</h2></div><span class="step-pill">01 / 03</span></div>
+          <label class="drop-zone"><input type="file" accept=".csv,text/csv" (change)="onFileSelected($event)" /><span class="upload-icon">↥</span><strong>{{ selectedFileName() }}</strong><small>CSV · up to 150 MB</small><span class="browse-link">Choose file</span></label>
+          @if (fieldErrors()['file']) { <small class="field-error">{{ fieldErrors()['file'] }}</small> }<div class="upload-foot"><span>Expected columns are validated automatically.</span><button class="button button-primary" type="button" [disabled]="busy() || !hasSelectedFile()" (click)="upload()">Upload and process <span>→</span></button></div>
+        </section>
+        <section class="panel import-guide">
+          <span class="section-kicker">WHAT HAPPENS NEXT</span><h2>Safe, traceable ingestion</h2>
+          <div class="guide-step"><span>1</span><div><strong>Stage</strong><small>Source rows are retained with their original values.</small></div></div>
+          <div class="guide-step"><span>2</span><div><strong>Validate</strong><small>Membership, ballots and internal consistency are checked.</small></div></div>
+          <div class="guide-step"><span>3</span><div><strong>Review</strong><small>Valid new rows are promoted; changes wait for review.</small></div></div>
+        </section>
+      </div>
+      <section class="panel table-panel">
+        <div class="panel-heading"><div><span class="section-kicker">HISTORY</span><h2>Recent imports</h2></div><button class="text-button" type="button" (click)="loadImports()">Refresh list ↻</button></div>
+        @if (imports().length) {
+          <div class="table-scroll"><table><thead><tr><th>FILE</th><th>STATUS</th><th>PROGRESS</th><th>UPLOADED BY</th><th>CREATED</th><th></th></tr></thead><tbody>
+            @for (item of imports(); track item.id) {
+              <tr class="click-row" [class.selected-row]="selectedImport()?.id === item.id" (click)="openImport(item)">
+                <td><span class="file-cell"><span class="file-icon">CSV</span><span><strong>{{ item.fileName }}</strong><small>{{ item.id | slice:0:8 }}</small></span></span></td>
+                <td><span class="status-badge" [class]="'status-badge ' + statusClass(item.status)">{{ item.status }}</span></td>
+                <td><div class="progress-cell"><div class="progress-track"><span [style.width.%]="progress(item)"></span></div><small>{{ item.progress?.phase ?? item.status }} · {{ item.progress?.current ?? item.rowsProcessed | number }} / {{ item.progress?.total ?? item.rowsTotal ?? '—' }} {{ item.progress?.unit ?? 'rows' }}</small></div></td>
+                <td>{{ item.uploadedBy ?? '—' }}</td><td>{{ item.createdAt | date:'medium' }}</td><td class="arrow-cell">›</td>
+              </tr>
+            }
+          </tbody></table></div>
+        } @else { <div class="empty-state"><span>↥</span><strong>No imports yet</strong><small>Choose a CSV above to start the first data import.</small></div> }
+        @if (importsHasMore()) { <div class="pagination-footer"><button class="button button-quiet" type="button" [disabled]="busy()" (click)="loadMoreImports()">Load more imports</button></div> }
+      </section>
+      @if (selectedImport()) {
+        <div class="modal-backdrop" role="presentation" tabindex="-1" (click)="closeImportDetails()" (keydown.escape)="closeImportDetails()">
+        <section class="panel detail-panel import-modal" role="dialog" aria-modal="true" aria-labelledby="import-report-title" (click)="$event.stopPropagation()"><div class="panel-heading modal-heading"><div><span class="section-kicker">IMPORT REPORT</span><h2 id="import-report-title">{{ selectedImport()?.fileName }}</h2></div><button class="icon-button" type="button" title="Close import report" (click)="closeImportDetails()">×</button></div>
+          <div class="modal-content">
+          <div class="detail-meta"><span>Status <strong><span class="status-badge" [class]="'status-badge ' + statusClass(selectedImport()?.status ?? '')">{{ selectedImport()?.status }}</span></strong></span><span>Import ID <code>{{ selectedImport()?.id }}</code></span><span>Rows processed <strong>{{ selectedImport()?.rowsProcessed | number }} / {{ selectedImport()?.rowsTotal | number }}</strong></span><span>Uploaded by <strong>{{ selectedImport()?.uploadedBy ?? 'Unknown' }}</strong></span></div>
+          @if (selectedImport()?.report?.error) { <div class="alert alert-error" role="alert">{{ selectedImport()?.report?.error }}</div> }
+          @if (selectedImport()?.originalImportId; as originalId) { <button type="button" class="button button-quiet" (click)="openImport({id:originalId})">Open original import report</button> }
+          @if (selectedImport()?.report) {
+            <p class="metadata-line">{{ selectedImport()?.report?.normalizedRows ?? 0 }} rows normalized. Source values are retained below.</p><div class="outcome-grid">
+              @for (outcome of importSummary(); track outcome.key) {
+                <article class="outcome-card" [class]="'outcome-card outcome-' + outcome.key.toLowerCase()"><span>{{ outcome.label }}</span><strong>{{ outcome.count | number }}</strong></article>
+              }
+            </div>
+            @if (importVoteRows().length) {
+              <section class="report-section"><div class="panel-heading"><div><span class="section-kicker">RESULTS BY VOTE</span><h3>Vote outcomes</h3></div><span class="count-pill">{{ importVoteRows().length }} votes</span></div>
+                <div class="table-scroll"><table><thead><tr><th>ASSEMBLY VOTE</th><th>RESULTS</th><th>ROWS</th></tr></thead><tbody>
+                  @for (vote of importVoteRows(); track vote.voteId) {
+                    <tr><td><strong>{{ vote.voteId }}</strong></td><td><div class="outcome-pills">@for (outcome of vote.counts; track outcome.key) { <span class="result-pill" [class]="'result-pill result-' + outcome.key.toLowerCase()">{{ outcome.count }} {{ outcome.label }}</span> }</div></td><td>{{ vote.total | number }}</td></tr>
+                  }
+                </tbody></table></div>
+              </section>
+            }
+          } @else { <div class="alert alert-info"><span>i</span>No row report is available for this import yet.</div> }
+          <section class="report-section row-review-section"><div class="panel-heading"><div><span class="section-kicker">SOURCE ROWS</span><h3>Row-level results</h3><p class="metadata-line">Showing up to 100 rows per filter, with the original CSV values and any validation reason.</p></div><label class="filter-label">Filter rows<select [ngModel]="importRowFilter()" (ngModelChange)="setImportRowFilter($event)"><option value="">All results</option><option value="New">New</option><option value="NoChange">Unchanged</option><option value="Conflict">Needs review</option><option value="Invalid">Invalid</option><option value="Contradiction">Contradiction</option><option value="Duplicate">Duplicate</option></select></label></div>
+            @if (importRows().length) {
+              <div class="table-scroll"><table><thead><tr><th>ROW</th><th>VOTE</th><th>COUNTRY</th><th>BALLOT</th><th>SOURCE</th><th>RESULT</th><th>DETAIL</th></tr></thead><tbody>
+                @for (row of importRows(); track row.rowNumber) {
+                  <tr><td>{{ row.rowNumber }}</td><td><strong>{{ row.values['assembly_vote_id'] ?? '—' }}</strong></td><td>{{ row.values['country_name'] ?? row.values['country_code'] ?? '—' }} <small class="subcell">{{ row.values['country_code'] ?? '' }}</small></td><td><span class="ballot-pill">{{ ballotLabel(row.values['ballot']) }}</span></td><td><span class="status-badge" [class]="'status-badge ' + statusClass(row.classification ?? 'Unclassified')">{{ outcomeLabel(row.classification ?? 'Unclassified') }}</span></td><td class="reason-cell">{{ row.reason ?? '—' }}<small class="subcell">{{ normalizationChanges(row) }}</small></td></tr>
+                }
+              </tbody></table></div>
+            } @else { <div class="compact-empty">No rows match this filter.</div> }
+            @if (importRowsHasMore()) { <div class="pagination-footer"><button class="button button-quiet" type="button" [disabled]="busy()" (click)="loadMoreImportRows()">Load next 100 rows</button></div> }
+          </section>
+          </div>
+        </section>
+        </div>
+      }

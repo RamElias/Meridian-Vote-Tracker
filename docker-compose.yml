@@ -21,9 +21,17 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__Meridian: Host=postgres;Port=5432;Database=meridian;Username=meridian;Password=${POSTGRES_PASSWORD}
+      Azure__KeyVault__VaultUri: ${AZURE_KEY_VAULT_URI:-}
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+      ConnectionStrings__Meridian: ${MERIDIAN_CONNECTION_STRING:-Host=postgres;Port=5432;Database=meridian;Username=meridian;Password=${POSTGRES_PASSWORD}}
       Seed__MemberStatesPath: /seed/member_states.csv
+      Storage__Provider: ${STORAGE_PROVIDER:-Local}
       Storage__LocalPath: /app/uploads
+      Storage__AzureBlob__ServiceUri: ${AZURE_BLOB_SERVICE_URI:-}
+      Storage__AzureBlob__Container: ${AZURE_BLOB_CONTAINER:-meridian-imports}
+      APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING:-}
     ports:
       - "8080:8080"
     volumes:
@@ -37,9 +45,17 @@ services:
       context: .
       dockerfile: src/Meridian.Worker/Dockerfile
     environment:
-      ConnectionStrings__Meridian: Host=postgres;Port=5432;Database=meridian;Username=meridian;Password=${POSTGRES_PASSWORD}
+      Azure__KeyVault__VaultUri: ${AZURE_KEY_VAULT_URI:-}
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+      ConnectionStrings__Meridian: ${MERIDIAN_CONNECTION_STRING:-Host=postgres;Port=5432;Database=meridian;Username=meridian;Password=${POSTGRES_PASSWORD}}
       Seed__MemberStatesPath: /seed/member_states.csv
+      Storage__Provider: ${STORAGE_PROVIDER:-Local}
       Storage__LocalPath: /app/uploads
+      Storage__AzureBlob__ServiceUri: ${AZURE_BLOB_SERVICE_URI:-}
+      Storage__AzureBlob__Container: ${AZURE_BLOB_CONTAINER:-meridian-imports}
+      APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING:-}
     volumes:
       - ../Assignment-DotNet/member_states.csv:/seed/member_states.csv:ro
       - uploads:/app/uploads
