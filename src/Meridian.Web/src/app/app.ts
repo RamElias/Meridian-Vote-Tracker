@@ -6,7 +6,12 @@ import { ReviewPage } from './features/review/review.page';
 import { PositionsPage } from './features/positions/positions.page';
 import { SnapshotsPage } from './features/snapshots/snapshots.page';
 
-@Component({ selector:'app-root', imports:[FormsModule,ImportsPage,ReviewPage,PositionsPage,SnapshotsPage],styleUrl:'./app.scss',templateUrl:'./app.html' })
+@Component({
+  selector: 'app-root',
+  imports: [FormsModule, ImportsPage, ReviewPage, PositionsPage, SnapshotsPage],
+  styleUrl: './app.scss',
+  templateUrl: './app.html',
+})
 export class App implements OnInit, OnDestroy {
   readonly workspace = inject(WorkspaceStore);
   readonly api = this.workspace.api;
@@ -21,6 +26,10 @@ export class App implements OnInit, OnDestroy {
   readonly section = this.workspace.section;
   readonly setUser = this.workspace.setUser.bind(this.workspace);
   readonly snapshots = this.workspace.snapshots;
-  ngOnInit(): void { void this.workspace.ngOnInit(); }
-  ngOnDestroy(): void { this.workspace.ngOnDestroy(); }
+  ngOnInit(): void {
+    void this.workspace.ngOnInit();
+  }
+  ngOnDestroy(): void {
+    this.workspace.ngOnDestroy();
+  }
 }

@@ -1,11 +1,15 @@
 import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { WorkspaceStore } from '../../workspace.store';
+import { SnapshotsStore } from './snapshots.store';
 
-@Component({selector:'app-snapshots-page', imports:[CommonModule,FormsModule], templateUrl:'./snapshots.page.html'})
+@Component({
+  selector: 'app-snapshots-page',
+  imports: [CommonModule, FormsModule],
+  templateUrl: './snapshots.page.html',
+})
 export class SnapshotsPage {
-  private readonly workspace = inject(WorkspaceStore);
+  private readonly workspace = inject(SnapshotsStore);
   readonly ballotLabel = this.workspace.ballotLabel.bind(this.workspace);
   readonly busy = this.workspace.busy;
   readonly contributions = this.workspace.contributions;
@@ -13,7 +17,6 @@ export class SnapshotsPage {
   readonly contributionsLoading = this.workspace.contributionsLoading;
   readonly countryCode = this.workspace.countryCode;
   readonly createSnapshot = this.workspace.createSnapshot.bind(this.workspace);
-  readonly error = this.workspace.error;
   readonly fieldErrors = this.workspace.fieldErrors;
   readonly formatPercent = this.workspace.formatPercent.bind(this.workspace);
   readonly isActivelyPublished = this.workspace.isActivelyPublished.bind(this.workspace);
@@ -28,8 +31,6 @@ export class SnapshotsPage {
   readonly publicationYear = this.workspace.publicationYear;
   readonly publishSnapshot = this.workspace.publishSnapshot.bind(this.workspace);
   readonly replaceActive = this.workspace.replaceActive;
-  readonly search = this.workspace.search;
-  readonly section = this.workspace.section;
   readonly selectedSnapshot = this.workspace.selectedSnapshot;
   readonly setCountryCode = this.workspace.setCountryCode.bind(this.workspace);
   readonly snapshotFrom = this.workspace.snapshotFrom;
@@ -42,6 +43,5 @@ export class SnapshotsPage {
   readonly snapshots = this.workspace.snapshots;
   readonly stanceLabel = this.workspace.stanceLabel.bind(this.workspace);
   readonly statusClass = this.workspace.statusClass.bind(this.workspace);
-  readonly votes = this.workspace.votes;
   readonly withdrawSnapshot = this.workspace.withdrawSnapshot.bind(this.workspace);
 }

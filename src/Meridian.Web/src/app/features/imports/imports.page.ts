@@ -1,18 +1,24 @@
 import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { WorkspaceStore } from '../../workspace.store';
+import { ImportsStore } from './imports.store';
+import { ReviewStore } from '../review/review.store';
 
-@Component({selector:'app-imports-page', imports:[CommonModule,FormsModule], templateUrl:'./imports.page.html'})
+@Component({
+  selector: 'app-imports-page',
+  imports: [CommonModule, FormsModule],
+  templateUrl: './imports.page.html',
+})
 export class ImportsPage {
-  private readonly workspace = inject(WorkspaceStore);
+  private readonly workspace = inject(ImportsStore);
+  private readonly reviewStore = inject(ReviewStore);
   readonly normalizationChanges = this.workspace.normalizationChanges.bind(this.workspace);
   readonly fieldErrors = this.workspace.fieldErrors;
   readonly ballotLabel = this.workspace.ballotLabel.bind(this.workspace);
   readonly busy = this.workspace.busy;
   readonly closeImportDetails = this.workspace.closeImportDetails.bind(this.workspace);
   readonly completedImportCount = this.workspace.completedImportCount;
-  readonly conflicts = this.workspace.conflicts;
+  readonly conflicts = this.reviewStore.conflicts;
   readonly hasSelectedFile = this.workspace.hasSelectedFile.bind(this.workspace);
   readonly importRowFilter = this.workspace.importRowFilter;
   readonly importRows = this.workspace.importRows;
@@ -29,11 +35,9 @@ export class ImportsPage {
   readonly outcomeLabel = this.workspace.outcomeLabel.bind(this.workspace);
   readonly processingCount = this.workspace.processingCount;
   readonly progress = this.workspace.progress.bind(this.workspace);
-  readonly section = this.workspace.section;
   readonly selectedFileName = this.workspace.selectedFileName.bind(this.workspace);
   readonly selectedImport = this.workspace.selectedImport;
   readonly setImportRowFilter = this.workspace.setImportRowFilter.bind(this.workspace);
   readonly statusClass = this.workspace.statusClass.bind(this.workspace);
   readonly upload = this.workspace.upload.bind(this.workspace);
-  readonly votes = this.workspace.votes;
 }

@@ -1,4 +1,4 @@
-using Meridian.Infrastructure;
+using Meridian.Infrastructure.Features.Imports.Processing;
 
 var path = args.FirstOrDefault() ?? throw new ArgumentException("Pass the path to assembly_export_2024_q1.csv.");
 using var reader = new StreamReader(path, detectEncodingFromByteOrderMarks: true);

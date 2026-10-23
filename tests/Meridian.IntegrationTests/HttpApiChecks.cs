@@ -37,7 +37,12 @@ internal static class HttpApiChecks
             if(!ready) throw new Exception("API did not become ready: "+logs);
             using var openApi=JsonDocument.Parse(await client.GetStringAsync("/openapi/v1.json"));
             var contract=openApi.RootElement;
+            using (var metadata = await client.GetAsync("/api/v1/meta"))
+                if (!metadata.IsSuccessStatusCode) throw new Exception("Public metadata requires authentication.");
             await Request(HttpMethod.Get,"/api/v1/votes",null,null,401,"Problem");
+            await Request(HttpMethod.Get,"/api/v1/vote","lana",null,400,"Problem");
+            await Request(HttpMethod.Get,"/api/v1/votes?session=not-an-integer","lana",null,400,"Problem");
+            await Request(HttpMethod.Put,"/api/v1/vote/position?voteId=m1","lana",new {stance="Y",weight=1},400,"Problem");
             await Request(HttpMethod.Get,"/api/v1/votes","unknown",null,401,"Problem");
             await Request(HttpMethod.Put,"/api/v1/vote/position?voteId=m1","dana",new {stance="Y",weight=1,expectedVersionId=(long?)null},403,"Problem");
             await Request(HttpMethod.Post,$"/api/v1/snapshots/{snapshotId}/publish","dana",new {year=2024,quarter=1,replaceActive=false},403,"Problem");

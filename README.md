@@ -1,6 +1,6 @@
 # Meridian Vote Tracker
 
-An ASP.NET Core 8, PostgreSQL, Angular and Docker Compose implementation of the Meridian Vote Tracker assignment. The current foundation starts the API and background Worker as separate processes, applies versioned PostgreSQL SQL migrations, and seeds member states and membership periods from the supplied CSV.
+An ASP.NET Core 8, PostgreSQL, Angular and Docker Compose implementation of the Meridian Vote Tracker assignment. It supports durable imports, human conflict review, versioned positions and reproducible ranking snapshots. API and Worker run as separate processes, share feature services and apply versioned PostgreSQL migrations. Member states and membership periods are seeded from the supplied CSV.
 
 ## Prerequisites
 
@@ -42,11 +42,13 @@ API v1 uses the seeded demo identities through `X-Demo-User` (`dana`, `omer`, or
 
 ## Project layout
 
-- `src/Meridian.Api` — HTTP API and OpenAPI
+- `src/Meridian.Api` — feature Controllers, authentication, request middleware and OpenAPI
 - `src/Meridian.Worker` — independent background process
-- `src/Meridian.Infrastructure` — PostgreSQL bootstrap and SQL migrations
-- `src/Meridian.Web` — Angular dashboard and Nginx API proxy
+- `src/Meridian.Infrastructure` — feature contracts/services/processors, storage adapters, PostgreSQL bootstrap and SQL migrations
+- `src/Meridian.Web` — Angular feature pages with separate state stores and Nginx API proxy
 - `docker-compose.yml` — PostgreSQL, API, Worker and Angular/Nginx Web
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the folder tree, request flow, service responsibilities and design trade-offs.
 
 Database migrations are applied at startup and recorded in `schema_migrations`. The initial migration enforces ISO alpha-3 state codes and non-overlapping, inclusive membership periods. Seed loading is repeatable.
 
