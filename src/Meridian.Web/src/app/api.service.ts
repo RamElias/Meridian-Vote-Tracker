@@ -1,3 +1,5 @@
+import { PdfImportsService } from './generated-api/services/pdf-imports.service';
+import { PdfExtraction, PdfReviewRequest } from './generated-api/models';
 import { Injectable, inject, signal } from '@angular/core';
 import { Observable, map } from 'rxjs';
 import { ConflictsService } from './generated-api/services/conflicts.service';
@@ -19,6 +21,7 @@ import {
 /** UI-facing facade over the OpenAPI-generated Angular client. */
 @Injectable({ providedIn: 'root' })
 export class ApiService {
+  private readonly pdfApi = inject(PdfImportsService);
   private readonly importsApi = inject(ImportsService);
   private readonly conflictsApi = inject(ConflictsService);
   private readonly votesApi = inject(VotesService);
@@ -102,4 +105,13 @@ export class ApiService {
   withdrawSnapshot(id: string): Observable<unknown> {
     return this.snapshotsApi.withdrawSnapshot({ id });
   }
+
+  pdfImports(offset=0): Observable<PdfExtraction[]> { return this.pdfApi.listPdfImports({offset,limit:50}); }
+  pdfImport(id:string): Observable<PdfExtraction> { return this.pdfApi.getPdfImport({id}); }
+  uploadPdf(file:File): Observable<PdfExtraction> { return this.pdfApi.createPdfImport({body:{file}}); }
+  pdfSource(id:string): Observable<Blob> { return this.pdfApi.getPdfSource({id}); }
+  savePdf(id:string,body:PdfReviewRequest): Observable<PdfExtraction> { return this.pdfApi.savePdfDraft({id,body}); }
+  approvePdf(id:string,body:PdfReviewRequest): Observable<PdfExtraction> { return this.pdfApi.approvePdfDraft({id,body}); }
+  rejectPdf(id:string,expectedVersion:number,note:string): Observable<PdfExtraction> { return this.pdfApi.rejectPdfDraft({id,body:{expectedVersion,note}}); }
+  retryPdf(id:string,expectedVersion:number): Observable<PdfExtraction> { return this.pdfApi.retryPdfImport({id,body:{expectedVersion}}); }
 }

@@ -1,3 +1,4 @@
+import { PdfUploadComponent } from '../pdf-imports/pdf-upload.component';
 import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -6,7 +7,7 @@ import { ReviewStore } from '../review/review.store';
 
 @Component({
   selector: 'app-imports-page',
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, PdfUploadComponent],
   templateUrl: './imports.page.html',
 })
 export class ImportsPage {

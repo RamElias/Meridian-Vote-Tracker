@@ -40,6 +40,23 @@ The principal API flows are:
 
 API v1 uses the seeded demo identities through `X-Demo-User` (`dana`, `omer`, or `lana`); `lana` is the Admin. This is assignment/demo authentication, not production identity.
 
+## PDF extraction bonus
+
+The **Data imports** page includes PDF upload/history; **Conflict review** includes a separate PDF queue, original-source preview, editable vote fields, country ballots, printed totals and source-review flags. Nothing extracted becomes approved vote data until an analyst approves the draft. Approval queues the existing CSV validation/classification flow, so overlapping/corrected PDFs use the same conflict rules. The source PDF, raw Azure response, original extracted draft, edits and reviewer attribution are retained.
+
+Configure the provided **Azure Document Intelligence** resource:
+
+- Set `DOCUMENT_INTELLIGENCE_ENDPOINT=https://<resource>.cognitiveservices.azure.com` in the ignored `.env`, or Key Vault secret `DocumentIntelligence--Endpoint`.
+- Prefer the existing service principal/managed identity with the resource's **Cognitive Services User** role. For key authentication, store its key as `DocumentIntelligence--ApiKey` in Key Vault. `DOCUMENT_INTELLIGENCE_API_KEY` in ignored `.env` is an alternative; do not commit its value.
+- Both API and Worker receive the same configuration. Run `docker compose up -d --build` after changing it. API/Worker stay local in Docker; only extraction calls the Azure resource.
+- Without a configured endpoint, the core CSV flows continue to work and PDF uploads return a clear setup message.
+
+Supported scope: the supplied Record of Vote table layout, PDF up to 20 MB, at most 20 pages in the returned analysis and 2,000 country rows. The deterministic adapter recognizes labelled vote metadata and Code/Member state/YES/NO/ABST tables, including side-by-side tables. It does not guess country codes from names. Unknown/multiple marks require correction; blank cells are proposed as `X` with a warning. All four printed totals must match the reviewed rows. Non-membership is flagged before review and is rejected by the normal CSV validator afterward. Supply the publication timestamp explicitly: these scans do not print one, and upload time is not substituted for it.
+
+The service uses [`prebuilt-layout`](https://learn.microsoft.com/azure/ai-services/document-intelligence/prebuilt/layout) via the [2024-11-30 binary REST API](https://learn.microsoft.com/rest/api/aiservices/document-models/analyze-document-from-stream?view=rest-aiservices-v4.0+%282024-11-30%29), without an LLM. Confidence below 0.85 or unavailable is a review flag, not an accuracy guarantee. Every approval requires source-review acknowledgement. Concurrent edits/decisions return 409 with current state. Failed or timed-out jobs expose a safe message and correlation reference and can be retried from history. The default timeout is 300 seconds (`DocumentIntelligence:TimeoutSeconds`, capped at 600). A restarted Worker resumes a persisted operation URL; an explicit retry submits a new analysis and can incur another Azure charge. A crash after Azure accepts a request but before its operation URL is saved can also cause resubmission.
+
+The PostgreSQL suite covers the full local workflow with simulated Azure responses, including a recording HTTP handler for headers/binary upload, concurrency, failure, timeout and restart. It does **not** measure real OCR accuracy or confirm Azure credentials. Evaluate the six supplied scans manually against independently labelled expected metadata/ballots and their printed totals, including the corrigendum, before claiming extraction quality. No synthetic test documents are sent to Azure.
+
 ## Project layout
 
 - `src/Meridian.Api` — feature Controllers, authentication, request middleware and OpenAPI

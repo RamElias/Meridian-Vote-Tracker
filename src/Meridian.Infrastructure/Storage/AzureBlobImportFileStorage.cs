@@ -5,8 +5,9 @@ namespace Meridian.Infrastructure.Storage;
 
 public sealed class AzureBlobImportFileStorage(BlobContainerClient container, string temporaryPath) : IImportFileStorage
 {
-    public async Task<StoredImportFile> SaveAsync(Guid importId, Stream source, CancellationToken cancellationToken)
+    public async Task<StoredImportFile> SaveAsync(Guid importId, Stream source, CancellationToken cancellationToken, string extension = ".csv")
     {
+        if (extension is not (".csv" or ".pdf")) throw new ArgumentException("Unsupported storage extension.", nameof(extension));
         Directory.CreateDirectory(temporaryPath);
         var temporaryFile = Path.Combine(temporaryPath, $"{Guid.NewGuid():N}.csv");
         try
@@ -16,7 +17,7 @@ public sealed class AzureBlobImportFileStorage(BlobContainerClient container, st
             string hash;
             await using (var stored = File.OpenRead(temporaryFile))
                 hash = Convert.ToHexString(await SHA256.HashDataAsync(stored, cancellationToken)).ToLowerInvariant();
-            var key = $"imports/{importId:N}.csv";
+            var key = $"imports/{importId:N}{extension}";
             await using (var stored = File.OpenRead(temporaryFile))
                 await container.GetBlobClient(key).UploadAsync(stored, overwrite: false, cancellationToken);
             return new StoredImportFile(key, hash);

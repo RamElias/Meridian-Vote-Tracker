@@ -1,3 +1,6 @@
+using Meridian.Infrastructure.Features.PdfImports.Contracts;
+using Meridian.Infrastructure.Features.PdfImports.Processing;
+using Meridian.Infrastructure.Features.PdfImports.Services;
 using Meridian.Infrastructure.BackgroundJobs;
 using Meridian.Infrastructure.Features.Imports.Contracts;
 using Meridian.Infrastructure.Features.Imports.Services;
@@ -34,6 +37,10 @@ public static class DependencyInjection
         services.AddSingleton<IConflictService, ConflictService>();
         services.AddSingleton<IVoteService, VoteService>();
         services.AddSingleton<ISnapshotService, SnapshotService>();
+        services.AddSingleton<IDocumentAnalysisClient>(_ => new AzureDocumentAnalysisClient(new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, PooledConnectionLifetime = TimeSpan.FromMinutes(5) }) { Timeout = TimeSpan.FromSeconds(30) }, configuration));
+        services.AddSingleton<PdfLayoutParser>();
+        services.AddSingleton<PdfDraftValidator>();
+        services.AddSingleton<IPdfImportService, PdfImportService>();
         return services;
     }
 }

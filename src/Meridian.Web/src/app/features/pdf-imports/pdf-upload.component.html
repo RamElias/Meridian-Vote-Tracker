@@ -1,0 +1,102 @@
+<section class="panel pdf-upload-panel">
+  <div class="panel-heading">
+    <div>
+      <span class="section-kicker">SCANNED RECORDS · BONUS</span>
+      <h2>Import a PDF voting sheet</h2>
+      <p>
+        Extract in Azure, check the source, then approve a draft. No extracted value is
+        automatically trusted.
+      </p>
+    </div>
+  </div>
+  <div class="pdf-upload-controls">
+    <label
+      >PDF · up to 20 MB<input
+        type="file"
+        accept=".pdf,application/pdf"
+        (change)="store.chooseFile($event)" /></label
+    ><button
+      class="button button-primary"
+      [disabled]="store.busy() || !store.file()"
+      (click)="store.upload()"
+    >
+      Upload and extract
+    </button>
+  </div>
+  @if (store.fieldErrors()['file']) {
+    <p class="field-error">{{ store.fieldErrors()['file'] }}</p>
+  }
+  @if (store.error()) {
+    <p role="alert" class="field-error">{{ store.error() }}</p>
+  }
+  @if (store.notice()) {
+    <p role="status">{{ store.notice() }}</p>
+  }
+  <div class="panel-heading">
+    <h3>PDF extraction history</h3>
+    <button class="text-button" (click)="store.refresh()">Refresh ↻</button>
+  </div>
+  @if (store.items().length) {
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>FILE</th>
+            <th>STATUS / PROGRESS</th>
+            <th>SOURCE</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (item of store.items(); track item.id) {
+            <tr>
+              <td>
+                <strong>{{ item.fileName }}</strong>
+              </td>
+              <td>
+                <span class="status-badge">{{ item.status }}</span
+                ><small class="subcell"
+                  >{{ item.progress?.phase }}
+                  @if (item.progress) {
+                    · {{ item.progress?.current }}
+                    @if (item.progress?.total) {
+                      / {{ item.progress?.total }}
+                    }
+                  }
+                </small>
+                @if (item.error) {
+                  <small class="field-error">{{ item.error }}</small>
+                }
+              </td>
+              <td>
+                {{ item.uploadedBy
+                }}<small class="subcell">{{ item.createdAt | date: 'medium' }}</small>
+              </td>
+              <td>
+                <button class="text-button" (click)="review(item)">
+                  {{ item.originalExtractionId ? 'Open original' : 'Open review' }}
+                </button>
+                @if (item.status === 'Failed') {
+                  <button
+                    class="button button-quiet"
+                    [disabled]="store.busy()"
+                    (click)="store.retry(item)"
+                  >
+                    Retry extraction
+                  </button>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    @if (store.hasMore()) {
+      <button class="text-button" (click)="store.loadMore()">Load more PDFs</button>
+    }
+  } @else {
+    <div class="compact-empty">
+      No PDFs uploaded yet. Configure Azure Document Intelligence to enable extraction.
+    </div>
+  }
+</section>

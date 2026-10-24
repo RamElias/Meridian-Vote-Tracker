@@ -31,6 +31,8 @@ services:
       Storage__LocalPath: /app/uploads
       Storage__AzureBlob__ServiceUri: ${AZURE_BLOB_SERVICE_URI:-}
       Storage__AzureBlob__Container: ${AZURE_BLOB_CONTAINER:-meridian-imports}
+      DocumentIntelligence__Endpoint: ${DOCUMENT_INTELLIGENCE_ENDPOINT:-}
+      DocumentIntelligence__ApiKey: ${DOCUMENT_INTELLIGENCE_API_KEY:-}
       APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING:-}
     ports:
       - "8080:8080"
@@ -55,6 +57,8 @@ services:
       Storage__LocalPath: /app/uploads
       Storage__AzureBlob__ServiceUri: ${AZURE_BLOB_SERVICE_URI:-}
       Storage__AzureBlob__Container: ${AZURE_BLOB_CONTAINER:-meridian-imports}
+      DocumentIntelligence__Endpoint: ${DOCUMENT_INTELLIGENCE_ENDPOINT:-}
+      DocumentIntelligence__ApiKey: ${DOCUMENT_INTELLIGENCE_API_KEY:-}
       APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING:-}
     volumes:
       - ../Assignment-DotNet/member_states.csv:/seed/member_states.csv:ro

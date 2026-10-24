@@ -1,3 +1,4 @@
+import { PdfImportsStore } from './features/pdf-imports/pdf-imports.store';
 import { Injectable, inject, signal, computed, OnInit, OnDestroy } from '@angular/core';
 import { ImportsStore } from './features/imports/imports.store';
 import { ReviewStore } from './features/review/review.store';
@@ -11,6 +12,7 @@ export class WorkspaceStore implements OnInit, OnDestroy {
   readonly reviewStore = inject(ReviewStore);
   readonly positionsStore = inject(PositionsStore);
   readonly snapshotsStore = inject(SnapshotsStore);
+  readonly pdfStore = inject(PdfImportsStore);
   readonly api = inject(ApiService);
   readonly section = signal<Section>('imports');
   readonly activeStore = computed(
@@ -31,6 +33,7 @@ export class WorkspaceStore implements OnInit, OnDestroy {
   async ngOnInit(): Promise<void> {
     await this.refreshAll();
     this.poller = setInterval(() => {
+      if(this.pdfStore.items().some(i=>['Queued','Running'].includes(i.status))) void this.pdfStore.refresh();
       if (this.importsStore.imports().some((item) => ['Queued', 'Running'].includes(item.status)))
         void this.importsStore.loadImports();
       if (
@@ -48,6 +51,7 @@ export class WorkspaceStore implements OnInit, OnDestroy {
     this.positionsStore.error.set('');
     this.snapshotsStore.error.set('');
     await Promise.all([
+      this.pdfStore.refresh(),
       this.importsStore.loadImports(),
       this.reviewStore.loadConflicts(),
       this.positionsStore.loadVotes(),
@@ -57,8 +61,8 @@ export class WorkspaceStore implements OnInit, OnDestroy {
   async chooseSection(section: Section): Promise<void> {
     this.section.set(section);
     this.activeStore().error.set('');
-    if (section === 'imports') await this.importsStore.loadImports();
-    if (section === 'review') await this.reviewStore.loadConflicts();
+    if (section === 'imports') await Promise.all([this.importsStore.loadImports(),this.pdfStore.refresh()]);
+    if (section === 'review') await Promise.all([this.reviewStore.loadConflicts(),this.pdfStore.refresh()]);
     if (section === 'positions') await this.positionsStore.loadVotes();
     if (section === 'snapshots') await this.snapshotsStore.loadSnapshots();
   }

@@ -9,6 +9,7 @@ describe('App', () => {
     demoUser: signal('lana'),
     setDemoUser: vi.fn(),
     imports: vi.fn(() => of([])),
+    pdfImports: vi.fn(() => of([])),
     conflicts: vi.fn(() => of([])),
     votes: vi.fn(() => of([])),
     snapshots: vi.fn(() => of([])),

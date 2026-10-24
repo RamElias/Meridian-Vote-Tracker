@@ -1077,6 +1077,681 @@
           "Votes"
         ]
       }
+    },
+    "/api/v1/pdf-imports": {
+      "get": {
+        "operationId": "ListPdfImports",
+        "tags": [
+          "PdfImports"
+        ],
+        "security": [
+          {
+            "DemoUser": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PdfExtraction"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "CreatePdfImport",
+        "tags": [
+          "PdfImports"
+        ],
+        "security": [
+          {
+            "DemoUser": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PdfExtraction"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PdfExtraction"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pdf-imports/{id}": {
+      "get": {
+        "operationId": "GetPdfImport",
+        "tags": [
+          "PdfImports"
+        ],
+        "security": [
+          {
+            "DemoUser": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PdfExtraction"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/pdf-imports/{id}/source": {
+      "get": {
+        "operationId": "GetPdfSource",
+        "tags": [
+          "PdfImports"
+        ],
+        "security": [
+          {
+            "DemoUser": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original PDF",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/pdf-imports/{id}/draft": {
+      "put": {
+        "operationId": "SavePdfDraft",
+        "tags": [
+          "PdfImports"
+        ],
+        "security": [
+          {
+            "DemoUser": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PdfExtraction"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PdfReviewRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pdf-imports/{id}/approve": {
+      "post": {
+        "operationId": "ApprovePdfDraft",
+        "tags": [
+          "PdfImports"
+        ],
+        "security": [
+          {
+            "DemoUser": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PdfExtraction"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PdfReviewRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pdf-imports/{id}/reject": {
+      "post": {
+        "operationId": "RejectPdfDraft",
+        "tags": [
+          "PdfImports"
+        ],
+        "security": [
+          {
+            "DemoUser": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PdfExtraction"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PdfDecisionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pdf-imports/{id}/retry": {
+      "post": {
+        "operationId": "RetryPdfImport",
+        "tags": [
+          "PdfImports"
+        ],
+        "security": [
+          {
+            "DemoUser": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PdfExtraction"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PdfDecisionRequest"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1108,6 +1783,21 @@
           },
           "correlationId": {
             "type": "string"
+          },
+          "issues": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "$ref": "#/components/schemas/PdfIssue"
+            }
+          },
+          "current": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PdfExtraction"
+              }
+            ],
+            "nullable": true
           }
         },
         "required": [
@@ -2038,6 +2728,310 @@
           "total",
           "unit",
           "updatedAt"
+        ]
+      },
+      "PdfIssue": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "Error",
+              "Warning"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "rowNumber": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "message",
+          "rowNumber"
+        ]
+      },
+      "PdfTotals": {
+        "type": "object",
+        "properties": {
+          "yes": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "no": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "abstain": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "absent": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "yes",
+          "no",
+          "abstain",
+          "absent"
+        ]
+      },
+      "PdfDraftRow": {
+        "type": "object",
+        "properties": {
+          "rowNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pageNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "countryCode": {
+            "type": "string"
+          },
+          "countryName": {
+            "type": "string"
+          },
+          "ballot": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "sourceText": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rowNumber",
+          "pageNumber",
+          "countryCode",
+          "countryName",
+          "ballot",
+          "confidence",
+          "sourceText"
+        ]
+      },
+      "PdfDraft": {
+        "type": "object",
+        "properties": {
+          "voteId": {
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "voteDate": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "publishedAt": {
+            "type": "string"
+          },
+          "printedTotals": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PdfTotals"
+              }
+            ],
+            "nullable": true
+          },
+          "rows": {
+            "type": "array",
+            "maxItems": 2000,
+            "items": {
+              "$ref": "#/components/schemas/PdfDraftRow"
+            }
+          }
+        },
+        "required": [
+          "voteId",
+          "session",
+          "voteDate",
+          "title",
+          "publishedAt",
+          "printedTotals",
+          "rows"
+        ]
+      },
+      "PdfProgress": {
+        "type": "object",
+        "properties": {
+          "phase": {
+            "type": "string"
+          },
+          "current": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          }
+        },
+        "required": [
+          "phase",
+          "current",
+          "total"
+        ]
+      },
+      "PdfExtraction": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "Queued",
+              "Running",
+              "AwaitingReview",
+              "Accepted",
+              "Rejected",
+              "Failed",
+              "Duplicate"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "uploadedBy": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "originalExtractionId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "draft": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PdfDraft"
+              }
+            ],
+            "nullable": true
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PdfIssue"
+            }
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "importId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "reviewedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "reviewedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "decisionNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "progress": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PdfProgress"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "fileName",
+          "status",
+          "version",
+          "uploadedBy",
+          "createdAt",
+          "originalExtractionId",
+          "draft",
+          "issues",
+          "error",
+          "importId",
+          "reviewedBy",
+          "reviewedAt",
+          "decisionNote",
+          "progress"
+        ]
+      },
+      "PdfReviewRequest": {
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1
+          },
+          "draft": {
+            "$ref": "#/components/schemas/PdfDraft"
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          },
+          "acknowledgeWarnings": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "draft"
+        ]
+      },
+      "PdfDecisionRequest": {
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "expectedVersion"
         ]
       }
     }

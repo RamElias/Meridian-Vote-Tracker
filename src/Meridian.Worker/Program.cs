@@ -1,3 +1,4 @@
+using Meridian.Infrastructure.Features.PdfImports.Processing;
 using Meridian.Infrastructure.Configuration;
 using Meridian.Infrastructure;
 using Meridian.Infrastructure.Features.Imports.Processing;
@@ -11,6 +12,7 @@ builder.Configuration.AddKeyVaultIfConfigured(builder.Configuration);
 builder.Services.AddMeridianInfrastructure(builder.Configuration);
 builder.Services.AddSingleton<CsvImportJobProcessor>();
 builder.Services.AddSingleton<RankingSnapshotJobProcessor>();
+builder.Services.AddSingleton<PdfExtractionJobProcessor>();
 builder.Services.AddHostedService<Worker>();
 if (!string.IsNullOrWhiteSpace(builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]) || !string.IsNullOrWhiteSpace(builder.Configuration["ApplicationInsights:ConnectionString"]))
     builder.Services.AddApplicationInsightsTelemetryWorkerService();

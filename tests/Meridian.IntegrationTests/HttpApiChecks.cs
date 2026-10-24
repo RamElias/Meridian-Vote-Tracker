@@ -47,6 +47,18 @@ internal static class HttpApiChecks
             await Request(HttpMethod.Put,"/api/v1/vote/position?voteId=m1","dana",new {stance="Y",weight=1,expectedVersionId=(long?)null},403,"Problem");
             await Request(HttpMethod.Post,$"/api/v1/snapshots/{snapshotId}/publish","dana",new {year=2024,quarter=1,replaceActive=false},403,"Problem");
             await Request(HttpMethod.Get,"/api/v1/imports","lana",null,200,"ImportRecord",true);
+            await Request(HttpMethod.Get,"/api/v1/pdf-imports",null,null,401,"Problem");
+            await Request(HttpMethod.Get,"/api/v1/pdf-imports","dana",null,200,"PdfExtraction",true);
+            await using(var pdfQuery=source.CreateCommand("SELECT id FROM pdf_extractions WHERE status='Accepted' ORDER BY created_at LIMIT 1"))
+            {
+                var pdfId=(Guid)(await pdfQuery.ExecuteScalarAsync())!;
+                var pdf=await Request(HttpMethod.Get,$"/api/v1/pdf-imports/{pdfId}","dana",null,200,"PdfExtraction");
+                await Request(HttpMethod.Post,$"/api/v1/pdf-imports/{pdfId}/approve","omer",new {expectedVersion=pdf.GetProperty("version").GetInt32(),draft=pdf.GetProperty("draft"),acknowledgeWarnings=true},409,"Problem");
+                using var request=new HttpRequestMessage(HttpMethod.Get,$"/api/v1/pdf-imports/{pdfId}/source");request.Headers.Add("X-Demo-User","dana");
+                using var response=await client.SendAsync(request);
+                if(!response.IsSuccessStatusCode || response.Content.Headers.ContentType?.MediaType!="application/pdf" || !(await response.Content.ReadAsStringAsync()).StartsWith("%PDF-"))throw new Exception("Authenticated PDF source unavailable");
+            }
+
             await Request(HttpMethod.Get,$"/api/v1/imports/{importId}","lana",null,200,"ImportDetails");
             await Request(HttpMethod.Get,$"/api/v1/imports/{importId}/rows?limit=100","lana",null,200,"ImportRow",true);
             await Request(HttpMethod.Get,"/api/v1/votes","lana",null,200,"VoteSummary",true);

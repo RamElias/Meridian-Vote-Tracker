@@ -438,3 +438,29 @@ app-imports-page, app-review-page, app-positions-page, app-snapshots-page { disp
 .calculation-rules { margin:12px 0; color:#52667b; font-size:13px; }
 .calculation-rules summary { cursor:pointer; font-weight:600; }
 .calculation-rules p { margin-top:8px; line-height:1.6; }
+
+.pdf-upload-panel { margin-top:24px; padding:24px; }
+.pdf-upload-controls,.pdf-actions { display:flex; flex-wrap:wrap; align-items:center; gap:16px; margin:18px 0; }
+.pdf-upload-controls label { display:grid; gap:8px; }
+.pdf-review-area { margin-bottom:32px; }
+.pdf-review-layout { display:grid; grid-template-columns:250px minmax(0,1fr); gap:20px; }
+.pdf-queue { padding:16px 0; align-self:start; max-height:650px; overflow:auto; }
+.pdf-queue h3 { padding:0 18px; }
+.pdf-editor { min-width:0; padding:22px; }
+.pdf-source { margin:18px 0; }
+.pdf-source summary { cursor:pointer; padding:12px; background:#edf5f3; border-radius:6px; }
+.pdf-source iframe { width:100%; height:540px; border:1px solid #dce5ed; margin-top:8px; }
+.pdf-form { border:0; padding:0; margin:0; min-width:0; }
+.pdf-form label { display:grid; gap:6px; color:#536b81; }
+.pdf-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.pdf-title-field { grid-column:1/-1; }
+.pdf-totals { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.pdf-form input:not([type=checkbox]),.pdf-form select { width:100%; min-height:36px; border:1px solid #d6e1eb; border-radius:5px; padding:8px; background:white; color:#16334e; }
+.pdf-row-table { max-height:580px; overflow:auto; margin-bottom:20px; }
+.pdf-row-table table { min-width:850px; }
+.pdf-row-table td:nth-child(2) { width:95px; }
+.pdf-row-table td:nth-child(4) { width:125px; }
+.pdf-flagged { background:#fffaf0; }
+.pdf-form .pdf-ack { display:flex; align-items:flex-start; gap:10px; margin-top:18px; line-height:1.7; }
+.pdf-issues { padding:10px 0; }
+@media(max-width:1100px) {.pdf-review-layout {grid-template-columns:1fr;} .pdf-queue {max-height:220px;} .pdf-fields {grid-template-columns:1fr;} .pdf-totals {grid-template-columns:repeat(2,1fr);}}

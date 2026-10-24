@@ -1,3 +1,4 @@
+import { PdfReviewComponent } from '../pdf-imports/pdf-review.component';
 import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -5,7 +6,7 @@ import { ReviewStore } from './review.store';
 
 @Component({
   selector: 'app-review-page',
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, PdfReviewComponent],
   templateUrl: './review.page.html',
 })
 export class ReviewPage {

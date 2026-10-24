@@ -14,11 +14,27 @@ public sealed class ImportService(NpgsqlDataSource dataSource, IImportFileStorag
             throw new InvalidDataException("Only .csv files are accepted.");
         var importId = Guid.NewGuid();
         var storedFile = await fileStorage.SaveAsync(importId, source, cancellationToken);
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var result = await EnqueuePreparedAsync(fileName, correlationId, uploadedByUserId, importId, storedFile, connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
+    internal async Task<CreatedImport> CreateWithinTransactionAsync(string fileName, string correlationId, string uploadedByUserId,
+        Stream source, NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    {
+        var importId = Guid.NewGuid();
+        var storedFile = await fileStorage.SaveAsync(importId, source, cancellationToken);
+        return await EnqueuePreparedAsync(fileName, correlationId, uploadedByUserId, importId, storedFile, connection, transaction, cancellationToken);
+    }
+
+    private static async Task<CreatedImport> EnqueuePreparedAsync(string fileName, string correlationId, string uploadedByUserId,
+        Guid importId, StoredImportFile storedFile, NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    {
         var storedPath = storedFile.Key;
         var hash = storedFile.Sha256;
         var safeName = Path.GetFileName(fileName);
-        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await using (var advisoryLock = new NpgsqlCommand("SELECT pg_advisory_xact_lock(hashtextextended(@hash, 0))", connection, transaction))
         {
             advisoryLock.Parameters.AddWithValue("hash", hash);
@@ -53,7 +69,6 @@ public sealed class ImportService(NpgsqlDataSource dataSource, IImportFileStorag
             job.Parameters.AddWithValue("correlationId", correlationId);
             await job.ExecuteNonQueryAsync(cancellationToken);
         }
-        await transaction.CommitAsync(cancellationToken);
         return new CreatedImport(importId, status, originalId);
     }
 

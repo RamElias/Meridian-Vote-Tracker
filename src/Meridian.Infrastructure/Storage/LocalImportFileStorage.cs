@@ -4,10 +4,11 @@ namespace Meridian.Infrastructure.Storage;
 
 public sealed class LocalImportFileStorage(string configuredStoragePath) : IImportFileStorage
 {
-    public async Task<StoredImportFile> SaveAsync(Guid importId, Stream source, CancellationToken cancellationToken)
+    public async Task<StoredImportFile> SaveAsync(Guid importId, Stream source, CancellationToken cancellationToken, string extension = ".csv")
     {
+        if (extension is not (".csv" or ".pdf")) throw new ArgumentException("Unsupported storage extension.", nameof(extension));
         Directory.CreateDirectory(configuredStoragePath);
-        var path = Path.Combine(configuredStoragePath, $"{importId:N}.csv");
+        var path = Path.Combine(configuredStoragePath, $"{importId:N}{extension}");
         await using (var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
             await source.CopyToAsync(output, cancellationToken);
         await using var stored = File.OpenRead(path);

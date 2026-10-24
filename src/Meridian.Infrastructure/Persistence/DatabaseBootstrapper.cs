@@ -16,6 +16,8 @@ public sealed class DatabaseBootstrapper(string connectionString, ILogger<Databa
             await resetImports.ExecuteNonQueryAsync(cancellationToken);
         await using (var resetSnapshots = new NpgsqlCommand("UPDATE ranking_snapshots SET status='Queued',completed_at=NULL,error_message=NULL WHERE id IN (SELECT id FROM background_jobs WHERE status='Running' AND job_type='ranking_snapshot')", connection, transaction))
             await resetSnapshots.ExecuteNonQueryAsync(cancellationToken);
+        await using (var resetPdfs = new NpgsqlCommand("UPDATE pdf_extractions SET status='Queued',version=version+1,updated_at=now() WHERE id IN (SELECT id FROM background_jobs WHERE status='Running' AND job_type='pdf_extraction') AND status='Running'", connection, transaction))
+            await resetPdfs.ExecuteNonQueryAsync(cancellationToken);
         await using (var resetJobs = new NpgsqlCommand("UPDATE background_jobs SET status='Queued',started_at=NULL,completed_at=NULL,error_message=NULL,progress_current=0 WHERE status='Running'", connection, transaction))
         {
             var recovered = await resetJobs.ExecuteNonQueryAsync(cancellationToken);

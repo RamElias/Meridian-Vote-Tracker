@@ -24,6 +24,7 @@ src/
       Votes/
         Contracts/         IVoteService and position requests/results
         Services/          Vote queries, timeline and optimistic position edits
+      PdfImports/          Contracts, extraction/validation processing and human review services
       Snapshots/
         Contracts/         ISnapshotService and selection/publication requests/results
         Services/          Selection capture, results and publication
@@ -83,3 +84,9 @@ The API and Worker run independently. One Worker holds a PostgreSQL ownership lo
 ## Verification
 
 The isolated PostgreSQL suite starts real API and Worker processes and checks imports, decisions, versions, snapshot calculations, progress, publication races, HTTP contracts, role restrictions and crash recovery. Angular tests include contribution response races and state isolation between screens. `VERIFICATION.md` records executed checks and distinguishes historical scale measurements from this structural refactor.
+
+## PDF bonus boundary
+
+`PdfImportsController` and `PdfImportService` persist source uploads and versioned review drafts. `PdfExtractionJobProcessor` calls the configured `IDocumentAnalysisClient`, persists its operation reference/raw result, and invokes deterministic layout parsing and domain checks. The draft stays in `AwaitingReview`. Approving locks its version and creates the CSV import/job and audit record in one PostgreSQL transaction. The CSV promoter itself keeps its existing transaction boundary and rules. Reviewed/rejected PDF records are protected by a database immutability trigger.
+
+`ImportService` shares a prepared-import enqueue method for that transaction; ordinary CSV file storage remains before its database transaction, as before. PDF originals use the same local/Blob adapter with a PDF extension. The Worker alternates fairly between CSV, snapshot and PDF queues. PDF service calls have a deadline; startup recovery preserves the operation URL. The two PDF components live within the existing Imports and Review screens and share a dedicated feature store.

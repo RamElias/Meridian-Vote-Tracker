@@ -6,3 +6,4 @@ export { ImportsService } from './services/imports.service';
 export { ConflictsService } from './services/conflicts.service';
 export { VotesService } from './services/votes.service';
 export { SnapshotsService } from './services/snapshots.service';
+export { PdfImportsService } from './services/pdf-imports.service';
