@@ -8,5 +8,6 @@ public interface IPdfImportService
     Task<Stream?> OpenSourceAsync(Guid id, CancellationToken ct);
     Task<PdfWriteResult> ReviewAsync(Guid id, PdfReviewRequest request, bool approve, string actor, string correlationId, CancellationToken ct);
     Task<PdfWriteResult> RejectAsync(Guid id, PdfDecisionRequest request, string actor, string correlationId, CancellationToken ct);
+    Task<PdfWriteResult> ReparseAsync(Guid id, PdfDecisionRequest request, string actor, string correlationId, CancellationToken ct);
     Task<PdfWriteResult> RetryAsync(Guid id, PdfDecisionRequest request, string actor, string correlationId, CancellationToken ct);
 }

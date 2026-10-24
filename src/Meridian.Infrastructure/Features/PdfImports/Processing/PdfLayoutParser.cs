@@ -64,11 +64,13 @@ public sealed class PdfLayoutParser
                 {
                     var headerRow = header.GetProperty("rowIndex").GetInt32();
                     var codeColumn = header.GetProperty("columnIndex").GetInt32();
+                    var nextCode = headers.Where(h=>h.GetProperty("rowIndex").GetInt32()==headerRow && h.GetProperty("columnIndex").GetInt32()>codeColumn).Select(h=>h.GetProperty("columnIndex").GetInt32()).DefaultIfEmpty(cells.Max(c=>c.GetProperty("columnIndex").GetInt32()+ (c.TryGetProperty("columnSpan",out var span)?span.GetInt32():1))).Min();
                     var columns = new Dictionary<string, int>();
-                    foreach (var cell in cells.Where(c => c.GetProperty("rowIndex").GetInt32() == headerRow && c.GetProperty("columnIndex").GetInt32() > codeColumn && c.GetProperty("columnIndex").GetInt32() < codeColumn + 5))
+                    foreach (var cell in cells.Where(c => c.GetProperty("rowIndex").GetInt32() == headerRow && c.GetProperty("columnIndex").GetInt32() > codeColumn && c.GetProperty("columnIndex").GetInt32() < nextCode))
                         columns[Clean(cell)] = cell.GetProperty("columnIndex").GetInt32();
                     if (!columns.ContainsKey("YES") || !columns.ContainsKey("NO") || !columns.Keys.Any(k => k.StartsWith("ABST", StringComparison.Ordinal)))
                         continue;
+                    var nameColumn = columns.Where(p=>p.Key.StartsWith("MEMBER",StringComparison.Ordinal)).Select(p=>p.Value).DefaultIfEmpty(codeColumn+1).First();
                     var abstColumn = columns.First(p => p.Key.StartsWith("ABST", StringComparison.Ordinal)).Value;
                     foreach (var rowGroup in cells.Where(c => c.GetProperty("rowIndex").GetInt32() > headerRow).GroupBy(c => c.GetProperty("rowIndex").GetInt32()).OrderBy(g => g.Key))
                     {
@@ -77,8 +79,8 @@ public sealed class PdfLayoutParser
                             break;
                         var row = rowGroup.GroupBy(c => c.GetProperty("columnIndex").GetInt32()).ToDictionary(g => g.Key, g => g.First());
                         string Cell(int col) => row.TryGetValue(col, out var c) ? c.GetProperty("content").GetString()?.Trim() ?? "" : "";
-                        var code = Cell(codeColumn);
-                        var name = Cell(codeColumn + 1);
+                        var code = Identity(Cell(codeColumn));
+                        var name = Identity(Cell(nameColumn));
                         if (string.IsNullOrWhiteSpace(code) && string.IsNullOrWhiteSpace(name))
                             continue;
                         var marks = new[]
@@ -90,14 +92,15 @@ public sealed class PdfLayoutParser
                         var selected = marks.Where(m => IsSelected(Cell(m.Item1))).ToArray();
                         var unknown = marks.Any(m => !IsSelected(Cell(m.Item1)) && !IsBlank(Cell(m.Item1)));
                         var ballot = !unknown && selected.Length == 1 ? selected[0].Item2 : !unknown && selected.Length == 0 ? "X" : "";
-                        var relevant = row.Where(p => p.Key >= codeColumn && p.Key <= codeColumn + 4).Select(p => p.Value).ToArray();
-                        var spans = relevant.Where(c => c.TryGetProperty("spans", out _)).SelectMany(c => c.GetProperty("spans").EnumerateArray()).ToArray();
+                        var relevant = row.Where(p => p.Key >= codeColumn && p.Key < nextCode).Select(p => p.Value).ToArray();
+                        var confidenceCells = row.Where(p=>p.Key==codeColumn || p.Key==nameColumn || selected.Any(m=>m.Item1==p.Key)).Select(p=>p.Value).ToArray();
+                        var spans = confidenceCells.Where(c => c.TryGetProperty("spans", out _)).SelectMany(c => c.GetProperty("spans").EnumerateArray()).ToArray();
                         var scores = confidence.Where(w => spans.Any(sp => w.Offset < sp.GetProperty("offset").GetInt32() + sp.GetProperty("length").GetInt32() && w.Offset + w.Length > sp.GetProperty("offset").GetInt32())).Select(w => w.Confidence).ToArray();
                         double? score = scores.Length == 0 ? null : scores.Min();
                         if (ballot == "X")
                             score = Math.Min(score ?? 0.5, 0.5); // Blank marks are review-sensitive absence, never high confidence.
                         var pageNumber = relevant.Where(c => c.TryGetProperty("boundingRegions", out _)).SelectMany(c => c.GetProperty("boundingRegions").EnumerateArray()).Select(b => b.GetProperty("pageNumber").GetInt32()).DefaultIfEmpty(1).First();
-                        rows.Add(new(rows.Count + 1, pageNumber, code.ToUpperInvariant(), name, ballot, score, string.Join(" | ", Enumerable.Range(codeColumn, 5).Select(Cell))));
+                        rows.Add(new(rows.Count + 1, pageNumber, code.ToUpperInvariant(), name, ballot, score, string.Join(" | ", Enumerable.Range(codeColumn, nextCode-codeColumn).Select(Cell))));
                         if (rows.Count > 2000)
                             throw new InvalidDataException("The extracted document contains too many rows.");
                     }
@@ -108,6 +111,7 @@ public sealed class PdfLayoutParser
         return new(voteId, session, date, title, "", totals, rows);
     }
 
+    private static string Identity(string text) => Regex.Replace(text,@":(?:un)?selected:|[☐☒☑]","",RegexOptions.IgnoreCase,RegexTimeout).Trim();
     private static string Clean(JsonElement c) => (c.GetProperty("content").GetString() ?? "").Trim().ToUpperInvariant().TrimEnd('.');
     private static bool IsSelected(string value) => value.Trim().ToLowerInvariant()is "x" or "×" or "✕" or "✗" or "✓" or "✔" or "☒" or "☑" or ":selected:" or "selected";
     private static bool IsBlank(string value) => value.Trim().ToLowerInvariant()is "" or "☐" or ":unselected:" or "unselected";

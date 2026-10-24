@@ -53,3 +53,5 @@ export type { RejectPdfDraft$Params as RejectPdfDraft$Params } from './fn/pdf-im
 export { rejectPdfDraft as rejectPdfDraft } from './fn/pdf-imports/reject-pdf-draft';
 export type { RetryPdfImport$Params as RetryPdfImport$Params } from './fn/pdf-imports/retry-pdf-import';
 export { retryPdfImport as retryPdfImport } from './fn/pdf-imports/retry-pdf-import';
+export type { ReparsePdfImport$Params as ReparsePdfImport$Params } from './fn/pdf-imports/reparse-pdf-import';
+export { reparsePdfImport as reparsePdfImport } from './fn/pdf-imports/reparse-pdf-import';

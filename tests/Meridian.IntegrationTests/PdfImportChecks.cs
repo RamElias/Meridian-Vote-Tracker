@@ -29,7 +29,10 @@ internal static class PdfImportChecks
         Check(item.Draft!.Rows[1].Ballot == "X" && item.Issues.Any(i => i.Code == "confidence"), "blank PDF cells and low confidence require source review");
         Check(item.Issues.Any(i => i.Code == "publishedAt"), "PDF publication timestamp must be supplied by reviewer");
         Check(await Count("SELECT count(*) FROM votes WHERE assembly_vote_id='MA/2024/777'") == 0, "extraction and validation create no approved vote");
-        var draft = item.Draft with
+        var reparsed=await service.ReparseAsync(item.Id,new(item.Version,null),"dana","pdf-test",default);
+        Check(reparsed.Applied && reparsed.Current!.Draft!.Rows.Count==2 && fake.Starts==1,"merged country columns and checkbox-only empty rows reparse without Azure");
+        item=reparsed.Current!;
+        var draft = item.Draft! with
         {
             PublishedAt = "2024-01-02T00:00:00Z"
         };
@@ -62,6 +65,7 @@ internal static class PdfImportChecks
         Check(saved.Applied && saved.Current!.Status == "AwaitingReview", "saving PDF draft retains unapproved state");
         result = await service.ReviewAsync(item.Id, new(item.Version, draft, null, true), true, "omer", "pdf-test", default);
         Check(result.Stale, "stale PDF draft cannot overwrite another reviewer's edits");
+        Check(!(await service.ReparseAsync(item.Id,new(saved.Current!.Version,null),"dana","pdf-test",default)).Applied,"reparse preserves saved human edits");
         item = saved.Current!;
         var approvals = await Task.WhenAll(Enumerable.Range(0, 2).Select(_ => service.ReviewAsync(item.Id, new(item.Version, draft, "Source checked", true), true, "dana", "pdf-test", default)));
         Check(approvals.Count(a => a.Applied) == 1 && approvals.Count(a => a.Stale) == 1, "concurrent PDF decisions: first approval wins");
@@ -228,27 +232,29 @@ internal static class PdfImportChecks
 
     private static string Layout(bool yes)
     {
-        object Table(string code, string name, string y, string n, int page) => new
+        object Table(string code, string name, string y, string n, int page, bool merged=false) => new
         {
             cells = new[]
             {
                 Cell(0, 0, "Code", page),
-                Cell(0, 1, "Member state", page),
-                Cell(0, 2, "YES", page),
-                Cell(0, 3, "NO", page),
-                Cell(0, 4, "ABST.", page),
+                Cell(0, 1, "Member state", page, merged?2:1),
+                Cell(0, 2+(merged?1:0), "YES", page),
+                Cell(0, 3+(merged?1:0), "NO", page),
+                Cell(0, 4+(merged?1:0), "ABST.", page),
                 Cell(1, 0, code, page),
-                Cell(1, 1, name, page),
-                Cell(1, 2, y, page),
-                Cell(1, 3, n, page),
-                Cell(1, 4, "", page)
+                Cell(1, 1, name, page, merged?2:1),
+                Cell(1, 2+(merged?1:0), y, page),
+                Cell(1, 3+(merged?1:0), n, page),
+                Cell(1, 4+(merged?1:0), "", page),
+                Cell(2,0,":unselected:",page),Cell(2,1,":unselected:",page)
             }
         };
-        return JsonSerializer.Serialize(new { pages = new[] { new { lines = new[] { "Vote No.: MA/2024/777", "Session: 79", "Date of vote: 1 January 2024", "Resolution: PDF regression", $"Recorded totals: Yes: {(yes ? 1 : 0)} No: {(yes ? 0 : 1)} Abstentions: 0 Not voting: 1" }.Select(content => new { content }), words = new[] { new { content = "AAA", confidence = 0.4, span = new { offset = 0, length = 3 } } } } }, tables = new[] { Table("AAA", "Alpha", yes ? "X" : "", yes ? "" : "X", 1), Table("BBB", "Beta", "", "", 2) } });
+        return JsonSerializer.Serialize(new { pages = new[] { new { lines = new[] { "Vote No.: MA/2024/777", "Session: 79", "Date of vote: 1 January 2024", "Resolution: PDF regression", $"Recorded totals: Yes: {(yes ? 1 : 0)} No: {(yes ? 0 : 1)} Abstentions: 0 Not voting: 1" }.Select(content => new { content }), words = new[] { new { content = "AAA", confidence = 0.4, span = new { offset = 0, length = 3 } } } } }, tables = new[] { Table("AAA", "Alpha", yes ? "X" : "", yes ? "" : "X", 1, true), Table("BBB", "Beta", "", "", 2) } });
     }
 
-    private static object Cell(int row, int col, string content, int page) => new
+    private static object Cell(int row, int col, string content, int page, int span=1) => new
     {
+        columnSpan=span,
         rowIndex = row,
         columnIndex = col,
         content,

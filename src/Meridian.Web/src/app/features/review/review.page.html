@@ -1,29 +1,219 @@
-<app-pdf-review />
-<section class="page-intro"><div><p>Resolve proposed changes without overwriting approved values silently.</p><div class="metadata-line">Each decision is attributed to the selected user and recorded in the audit trail.</div></div><span class="eyebrow">HUMAN REVIEW</span></section>
-      <div class="review-summary"><span class="review-mark">◈</span><div><strong>{{ conflicts().length }} {{ conflictStatus() === 'Pending' ? 'open' : 'resolved' }} review item{{ conflicts().length === 1 ? '' : 's' }}</strong><small>Select an item to compare its values, sources and decision.</small></div><label class="conflict-filter">Vote ID<input [ngModel]="conflictVoteFilter()" (ngModelChange)="conflictVoteFilter.set($event)" (keyup.enter)="searchConflicts()" placeholder="Filter by vote" /></label><label class="conflict-filter">Status<select [ngModel]="conflictStatus()" (ngModelChange)="conflictStatus.set($event); searchConflicts()"><option value="Pending">Pending</option><option value="Resolved">Resolved</option></select></label><button class="text-button" type="button" (click)="loadConflicts()">Refresh ↻</button></div>
-      <div class="review-layout">
-        <section class="panel conflict-queue"><div class="panel-heading"><div><span class="section-kicker">{{ conflictStatus() === 'Pending' ? 'OPEN ITEMS' : 'DECISION HISTORY' }}</span><h2>{{ conflictStatus() === 'Pending' ? 'Review queue' : 'Resolved conflicts' }}</h2></div><span class="count-pill">{{ conflicts().length }}</span></div>
-          @if (conflicts().length) {
-            <div class="conflict-queue-list">@for (conflict of conflicts(); track conflict.id) {
-              <button type="button" class="conflict-queue-item" [class.active]="selectedConflictId() === conflict.id" [attr.aria-pressed]="selectedConflictId() === conflict.id" (click)="selectConflict(conflict.id)">
-                <span class="queue-mark">{{ conflict.targetType === 'VoteMetadata' ? 'V' : 'C' }}</span><span class="queue-copy"><strong>{{ conflict.voteId }}</strong><span>{{ conflict.targetType === 'VoteMetadata' ? 'Vote details' : 'Country ballot' }}{{ conflict.countryCode ? ' · ' + conflict.countryCode : '' }}</span><small>{{ conflict.proposals.length }} proposal{{ conflict.proposals.length === 1 ? '' : 's' }} · {{ conflict.createdAt | date:'medium' }}@if (conflict.status !== 'Pending') { · {{ conflict.status }} }</small></span><span class="queue-chevron">›</span>
-              </button>
-            }</div>
-          } @else { <div class="compact-empty queue-empty">No pending conflicts.</div> }
-        </section>
-        <section class="panel conflict-detail">
-          @if (selectedConflict(); as conflict) {
-            <div class="conflict-detail-heading"><div><span class="conflict-type">{{ conflict.targetType === 'VoteMetadata' ? 'VOTE DETAILS' : 'COUNTRY BALLOT' }}</span><h2>{{ conflict.voteId }}{{ conflict.countryCode ? ' · ' + conflict.countryCode : '' }}</h2></div><span class="status-badge" [class]="'status-badge ' + (conflict.status === 'Pending' ? 'status-running' : 'status-success')">{{ conflict.status }}</span></div>
-            @if (conflict.targetType === 'CountryVote') { <p class="conflict-country-name">{{ conflict.currentValue['countryName'] }}</p> }
-            <div class="comparison-grid"><div class="value-card current-value"><span class="section-kicker">APPROVED VALUE</span><div class="human-value-list">@for (field of conflictFields(conflict.targetType, conflict.currentValue); track field.label) { <div><span>{{ field.label }}</span><strong>{{ field.text }}</strong></div> }</div>@if (conflict.currentSource) { <small class="source-caption">From {{ conflict.currentSource.fileName }} · {{ conflict.currentSource.uploadedBy ?? 'Unknown uploader' }} · {{ conflict.currentSource.uploadedAt | date:'medium' }}</small> }</div>
-              <div class="proposal-stack"><span class="section-kicker">INCOMING VALUES · {{ conflict.proposals.length }}</span>
-                @for (proposal of conflict.proposals; track $index) {
-                  <div class="proposal-card"><div class="proposal-top"><strong>Proposal {{ $index + 1 }}</strong><small>{{ proposal.source.fileName }} · {{ proposal.source.uploadedBy ?? 'Unknown' }} · {{ proposal.source.uploadedAt | date:'short' }}@if (proposal.source.rowNumber) { · row {{ proposal.source.rowNumber }} }</small></div><div class="human-value-list">@for (field of conflictFields(conflict.targetType, proposal.value); track field.label) { <div><span>{{ field.label }}</span><strong>{{ field.text }}</strong></div> }</div>@if (conflict.status === 'Pending') { <button class="button button-primary button-small" type="button" [disabled]="busy()" (click)="decide(conflict, 'Accept', $index)">Accept this value</button> }</div>
+<section class="page-intro">
+  <div>
+    <p>Items waiting for a human decision.</p>
+    <div class="metadata-line">
+      Compare conflicts, verify PDF extractions, and revisit recorded decisions.
+    </div>
+  </div>
+  <span class="eyebrow">HUMAN REVIEW</span>
+</section>
+<div class="review-layout unified-review">
+  <section class="panel conflict-queue">
+    <div class="review-queue-controls">
+      <label class="review-filter-label"
+        >Filter by vote<input
+          [ngModel]="conflictVoteFilter()"
+          (ngModelChange)="conflictVoteFilter.set($event)"
+          (keyup.enter)="refreshReview()"
+          placeholder="Filter by vote…"
+      /></label>
+      <div class="review-tabs" role="tablist" aria-label="Review categories">
+        <button
+          role="tab"
+          [attr.aria-selected]="tab() === 'conflicts'"
+          [class.active]="tab() === 'conflicts'"
+          (click)="chooseTab('conflicts')"
+        >
+          Conflicts <span>{{ conflicts().length }}</span>
+        </button>
+        <button
+          role="tab"
+          [attr.aria-selected]="tab() === 'extractions'"
+          [class.active]="tab() === 'extractions'"
+          (click)="chooseTab('extractions')"
+        >
+          Extractions <span>{{ pendingPdfCount() }}</span>
+        </button>
+        <button
+          role="tab"
+          [attr.aria-selected]="tab() === 'resolved'"
+          [class.active]="tab() === 'resolved'"
+          (click)="chooseTab('resolved')"
+        >
+          Resolved
+        </button>
+      </div>
+      <button class="text-button" (click)="refreshReview()">Refresh ↻</button>
+    </div>
+    <div class="conflict-queue-list" role="tabpanel">
+      @for (conflict of queueConflicts(); track conflict.id) {
+        <button
+          class="conflict-queue-item"
+          [class.active]="selectedKind() === 'conflict' && selectedConflictId() === conflict.id"
+          (click)="pickConflict(conflict.id)"
+        >
+          <span class="queue-copy"
+            ><strong>{{ conflict.voteId }}</strong
+            ><span
+              >{{ conflict.countryCode ?? 'Vote details' }} ·
+              {{ conflict.targetType === 'CountryVote' ? 'Country ballot' : 'Metadata' }}</span
+            ><small>{{ conflict.status }} · {{ conflict.createdAt | date: 'short' }}</small></span
+          ><span class="status-badge">{{ conflict.status }}</span>
+        </button>
+      }
+      @for (item of queuePdfs(); track item.id) {
+        <button
+          class="conflict-queue-item"
+          [class.active]="selectedKind() === 'pdf' && pdf.selected()?.id === item.id"
+          (click)="openPdf(item)"
+        >
+          <span class="queue-copy"
+            ><strong>{{ item.fileName }}</strong
+            ><span>PDF extraction</span
+            ><small>{{ item.uploadedBy }} · {{ item.createdAt | date: 'short' }}</small></span
+          ><span class="status-badge">{{ item.status }}</span>
+        </button>
+      }
+      @if (!queueConflicts().length && !queuePdfs().length) {
+        <div class="compact-empty">
+          No
+          {{
+            tab() === 'resolved'
+              ? 'resolved items'
+              : tab() === 'extractions'
+                ? 'extractions'
+                : 'pending conflicts'
+          }}
+          match this filter.
+        </div>
+      }
+    </div>
+  </section>
+  <div class="review-detail-pane">
+    @if (selectedKind() === 'pdf') {
+      <app-pdf-review />
+    } @else {
+      <section class="panel conflict-detail">
+        @if (selectedConflict(); as conflict) {
+          <div class="conflict-detail-heading">
+            <div>
+              <span class="conflict-type">{{
+                conflict.targetType === 'VoteMetadata' ? 'VOTE DETAILS' : 'COUNTRY BALLOT'
+              }}</span>
+              <h2>
+                {{ conflict.voteId }}{{ conflict.countryCode ? ' · ' + conflict.countryCode : '' }}
+              </h2>
+            </div>
+            <span
+              class="status-badge"
+              [class]="
+                'status-badge ' +
+                (conflict.status === 'Pending' ? 'status-running' : 'status-success')
+              "
+              >{{ conflict.status }}</span
+            >
+          </div>
+          @if (conflict.targetType === 'CountryVote') {
+            <p class="conflict-country-name">{{ conflict.currentValue['countryName'] }}</p>
+          }
+          <div
+            class="comparison-grid"
+            [class.country-comparison]="conflict.targetType === 'CountryVote'"
+          >
+            <div class="value-card current-value">
+              <span class="section-kicker">APPROVED VALUE</span>
+              <div class="human-value-list">
+                @for (
+                  field of conflictFields(conflict.targetType, conflict.currentValue);
+                  track field.label
+                ) {
+                  <div>
+                    <span>{{ field.label }}</span
+                    ><strong>{{ field.text }}</strong>
+                  </div>
                 }
               </div>
+              @if (conflict.currentSource) {
+                <small class="source-caption"
+                  >From {{ conflict.currentSource.fileName }} ·
+                  {{ conflict.currentSource.uploadedBy ?? 'Unknown uploader' }} ·
+                  {{ conflict.currentSource.uploadedAt | date: 'medium' }}</small
+                >
+              }
             </div>
-            @if (conflict.status === 'Pending') { <div class="conflict-footer"><label class="inline-note">Decision note <input [ngModel]="decisionNote()" (ngModelChange)="decisionNote.set($event)" placeholder="Optional context for the audit trail" /></label><button class="button button-quiet" type="button" [disabled]="busy()" (click)="decide(conflict, 'Reject')">Reject proposals</button></div> }
-            @else { <div class="conflict-footer"><span>{{ conflict.status }} by {{ conflict.decidedBy ?? 'Unknown' }} · {{ conflict.decidedAt | date:'medium' }}{{ conflict.decisionNote ? ' · ' + conflict.decisionNote : '' }}</span></div> }
-          } @else { <div class="empty-state"><span>✓</span><strong>Review queue is clear</strong><small>New conflicts will appear here after an import.</small></div> }
-        </section>
-      </div>
+            <div class="proposal-stack">
+              <span class="section-kicker">INCOMING VALUES · {{ conflict.proposals.length }}</span>
+              @for (proposal of conflict.proposals; track $index) {
+                <div class="proposal-card">
+                  <div class="proposal-top">
+                    <strong>Proposal {{ $index + 1 }}</strong
+                    ><small
+                      >{{ proposal.source.fileName }} ·
+                      {{ proposal.source.uploadedBy ?? 'Unknown' }} ·
+                      {{ proposal.source.uploadedAt | date: 'short' }}
+                      @if (proposal.source.rowNumber) {
+                        · row {{ proposal.source.rowNumber }}
+                      }
+                    </small>
+                  </div>
+                  <div class="human-value-list">
+                    @for (
+                      field of conflictFields(conflict.targetType, proposal.value);
+                      track field.label
+                    ) {
+                      <div>
+                        <span>{{ field.label }}</span
+                        ><strong>{{ field.text }}</strong>
+                      </div>
+                    }
+                  </div>
+                  @if (conflict.status === 'Pending') {
+                    <button
+                      class="button button-primary button-small"
+                      type="button"
+                      [disabled]="busy()"
+                      (click)="decide(conflict, 'Accept', $index)"
+                    >
+                      Accept this value
+                    </button>
+                  }
+                </div>
+              }
+            </div>
+          </div>
+          @if (conflict.status === 'Pending') {
+            <div class="conflict-footer">
+              <label class="inline-note"
+                >Decision note
+                <input
+                  [ngModel]="decisionNote()"
+                  (ngModelChange)="decisionNote.set($event)"
+                  placeholder="Optional context for the audit trail" /></label
+              ><button
+                class="button button-quiet"
+                type="button"
+                [disabled]="busy()"
+                (click)="decide(conflict, 'Reject')"
+              >
+                Reject proposals
+              </button>
+            </div>
+          } @else {
+            <div class="conflict-footer">
+              <span
+                >{{ conflict.status }} by {{ conflict.decidedBy ?? 'Unknown' }} ·
+                {{ conflict.decidedAt | date: 'medium'
+                }}{{ conflict.decisionNote ? ' · ' + conflict.decisionNote : '' }}</span
+              >
+            </div>
+          }
+        } @else {
+          <div class="empty-state">
+            <span>✓</span><strong>Review queue is clear</strong
+            ><small>New conflicts will appear here after an import.</small>
+          </div>
+        }
+      </section>
+    }
+  </div>
+</div>

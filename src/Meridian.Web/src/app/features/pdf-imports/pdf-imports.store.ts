@@ -264,6 +264,24 @@ export class PdfImportsStore extends FeatureStore {
       this.issues.set(issues);
     }
   }
+  async reparse(): Promise<void> {
+    const item = this.selected();
+    if (!item || this.dirty()) return;
+    await this.run(async () => {
+      try {
+        const current = await firstValueFrom(this.api.reparsePdf(item.id, item.version));
+        if (this.selected()?.id === item.id) {
+          this.selected.set(current);
+          this.applyDraft(current);
+        }
+        this.notice.set('Stored analysis re-read. No new Azure request was sent.');
+        await this.refresh();
+      } catch (error) {
+        await this.handleWriteError(error, item.id);
+        throw error;
+      }
+    });
+  }
   async ensureSource(): Promise<void> {
     const item = this.selected();
     if (!item || this.sourceUrl()) return;

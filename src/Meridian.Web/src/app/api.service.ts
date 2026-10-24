@@ -114,4 +114,5 @@ export class ApiService {
   approvePdf(id:string,body:PdfReviewRequest): Observable<PdfExtraction> { return this.pdfApi.approvePdfDraft({id,body}); }
   rejectPdf(id:string,expectedVersion:number,note:string): Observable<PdfExtraction> { return this.pdfApi.rejectPdfDraft({id,body:{expectedVersion,note}}); }
   retryPdf(id:string,expectedVersion:number): Observable<PdfExtraction> { return this.pdfApi.retryPdfImport({id,body:{expectedVersion}}); }
+  reparsePdf(id:string,expectedVersion:number):Observable<PdfExtraction> {return this.pdfApi.reparsePdfImport({id,body:{expectedVersion}});}
 }

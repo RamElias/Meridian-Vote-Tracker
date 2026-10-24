@@ -12,10 +12,16 @@ export class ReviewStore extends FeatureStore {
   private readonly importsStore = inject(ImportsStore);
   readonly conflicts = signal<ConflictRecord[]>([]);
 
+  readonly reviewTab = signal<'conflicts' | 'extractions' | 'resolved'>('conflicts');
+  readonly selectedReviewKind = signal<'conflict' | 'pdf'>('conflict');
+  readonly resolvedConflicts = signal<ConflictRecord[]>([]);
   readonly selectedConflictId = signal<string | null>(null);
 
   readonly selectedConflict = computed(
-    () => this.conflicts().find((item) => item.id === this.selectedConflictId()) ?? null,
+    () =>
+      [...this.conflicts(), ...this.resolvedConflicts()].find(
+        (item) => item.id === this.selectedConflictId(),
+      ) ?? null,
   );
 
   readonly decisionNote = signal('');
@@ -28,11 +34,13 @@ export class ReviewStore extends FeatureStore {
 
   async loadConflicts(): Promise<void> {
     try {
-      const conflicts = await firstValueFrom(
-        this.api.conflicts(this.conflictVoteFilter(), this.conflictStatus()),
-      );
+      const [conflicts, resolved] = await Promise.all([
+        firstValueFrom(this.api.conflicts(this.conflictVoteFilter(), 'Pending')),
+        firstValueFrom(this.api.conflicts(this.conflictVoteFilter(), 'Resolved')),
+      ]);
+      this.resolvedConflicts.set(resolved);
       this.conflicts.set(conflicts);
-      if (!conflicts.some((item) => item.id === this.selectedConflictId()))
+      if (![...conflicts, ...resolved].some((item) => item.id === this.selectedConflictId()))
         this.selectedConflictId.set(conflicts[0]?.id ?? null);
     } catch (error) {
       this.showError(error);

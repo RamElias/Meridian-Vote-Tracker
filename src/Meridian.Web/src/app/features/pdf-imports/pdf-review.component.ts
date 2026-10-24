@@ -18,7 +18,23 @@ export class PdfReviewComponent implements OnDestroy, OnInit {
       ? this.sanitizer.bypassSecurityTrustResourceUrl(url + '#page=' + this.store.sourcePage())
       : null;
   });
-  readonly globalIssues = computed(() => this.store.issues().filter((i) => i.rowNumber === null));
+  readonly globalIssues = computed(() =>
+    this.store
+      .issues()
+      .filter(
+        (i) =>
+          i.rowNumber === null &&
+          ![
+            'voteId',
+            'session',
+            'voteDate',
+            'title',
+            'publishedAt',
+            'printedTotals',
+            'totalsMismatch',
+          ].includes(i.code),
+      ),
+  );
   readonly editable = computed(() => this.store.selected()?.status === 'AwaitingReview');
   ngOnInit(): void {
     void this.store.ensureSource();

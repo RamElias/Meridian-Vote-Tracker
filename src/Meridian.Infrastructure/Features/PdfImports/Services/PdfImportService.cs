@@ -157,6 +157,29 @@ public sealed class PdfImportService(NpgsqlDataSource source, IImportFileStorage
         return new(true, Current: await ReadCurrentAsync(id, connection, null, ct));
     }
 
+    public async Task<PdfWriteResult> ReparseAsync(Guid id, PdfDecisionRequest request, string actor, string correlationId, CancellationToken ct)
+    {
+        await using var connection=await source.OpenConnectionAsync(ct);
+        await using var tx=await connection.BeginTransactionAsync(ct);
+        var state=await LockAsync(id,connection,tx,ct);
+        if(state is null)return new(false,NotFound:true);
+        if(state.Value.Status!="AwaitingReview" || state.Value.Version!=request.ExpectedVersion)
+            return new(false,Stale:true,Error:"This extraction changed. Reload its current state.",Current:await ReadCurrentAsync(id,connection,tx,ct));
+        if(JsonSerializer.Serialize(state.Value.Original,Json)!=JsonSerializer.Serialize(state.Value.Draft,Json))
+            return new(false,Error:"This draft has saved human edits. Re-reading is blocked to preserve those edits.");
+        string analysisJson;
+        await using(var read=new NpgsqlCommand("SELECT analysis::text FROM pdf_extractions WHERE id=@id",connection,tx))
+        {read.Parameters.AddWithValue("id",id);analysisJson=await read.ExecuteScalarAsync(ct) as string ?? throw new InvalidDataException("No stored analysis is available.");}
+        var parsed=new PdfLayoutParser().Parse(analysisJson);
+        var draft=PdfDraftValidator.Normalize(parsed,parsed);
+        var issues=await validator.ValidateAsync(draft,connection,tx,ct);
+        await using(var update=new NpgsqlCommand("UPDATE pdf_extractions SET draft=@draft,extracted_draft=@draft,issues=@issues,version=version+1,updated_at=now() WHERE id=@id",connection,tx))
+        {update.Parameters.AddWithValue("id",id);update.Parameters.AddWithValue("draft",NpgsqlDbType.Jsonb,JsonSerializer.Serialize(draft,Json));update.Parameters.AddWithValue("issues",NpgsqlDbType.Jsonb,JsonSerializer.Serialize(issues,Json));await update.ExecuteNonQueryAsync(ct);}
+        await AuditAsync(id,"PdfDraftReparsed",actor,correlationId,"Re-read stored analysis; no Azure call",state.Value.Draft,draft,null,connection,tx,ct);
+        await tx.CommitAsync(ct);
+        return new(true,Current:await ReadCurrentAsync(id,connection,null,ct));
+    }
+
     public async Task<PdfWriteResult> RejectAsync(Guid id, PdfDecisionRequest request, string actor, string correlationId, CancellationToken ct) => await ChangeStateAsync(id, request, "AwaitingReview", "Rejected", actor, correlationId, ct);
     public async Task<PdfWriteResult> RetryAsync(Guid id, PdfDecisionRequest request, string actor, string correlationId, CancellationToken ct)
     {

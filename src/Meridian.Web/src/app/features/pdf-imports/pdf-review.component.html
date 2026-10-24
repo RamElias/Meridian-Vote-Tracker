@@ -1,296 +1,260 @@
-@if (store.items().length || store.selected()) {
-  <section class="pdf-review-area">
+<section class="panel pdf-editor">
+  @if (store.selected(); as item) {
     <div class="panel-heading">
       <div>
-        <span class="section-kicker">SCANNED PDF REVIEW</span>
-        <h2>Verify extracted voting sheets</h2>
-        <p>
-          Compare every field with the source. Approval queues the normal import validator;
-          corrections become conflicts.
-        </p>
+        <h3>{{ item.fileName }}</h3>
+        <span class="status-badge">{{ item.status }}</span
+        ><small> Version {{ item.version }}</small>
       </div>
-      <button class="text-button" (click)="store.refresh()">Refresh ↻</button>
+      @if (store.sourceUrl()) {
+        <a class="text-button" [href]="store.sourceUrl()" [download]="item.fileName"
+          >Download original PDF</a
+        >
+      }
     </div>
-    <div class="pdf-review-layout">
-      <aside class="panel pdf-queue">
-        <h3>PDF queue</h3>
-        @for (item of store.items(); track item.id) {
-          <button
-            class="conflict-queue-item"
-            [class.active]="store.selected()?.id === item.id"
-            (click)="store.open(item)"
+    @if (store.error()) {
+      <p role="alert" class="field-error">{{ store.error() }}</p>
+    }
+    @if (store.notice()) {
+      <p role="status">{{ store.notice() }}</p>
+    }
+    @if (item.error) {
+      <p class="field-error">{{ item.error }}</p>
+    }
+    @if (item.status === 'Failed') {
+      <button class="button button-primary" [disabled]="store.busy()" (click)="store.retry(item)">
+        Retry extraction
+      </button>
+    }
+    @if (item.status === 'Queued' || item.status === 'Running') {
+      <p role="status">
+        {{ item.progress?.phase ?? 'Queued' }} · {{ item.progress?.current ?? 0 }}. You can leave
+        this screen and return later.
+      </p>
+    }
+    @if (sourcePreview(); as preview) {
+      <details class="pdf-source" open>
+        <summary>Original scanned sheet · page {{ store.sourcePage() }}</summary>
+        <iframe [src]="preview" title="Original PDF voting sheet"></iframe>
+      </details>
+    }
+    @if (item.status === 'AwaitingReview') {
+      <div class="pdf-reparse-note">
+        <span
+          >Missing rows or merged columns? Re-read the stored analysis with the current parser.
+          Saved human edits are protected.</span
+        ><button
+          class="button button-quiet"
+          [disabled]="store.busy() || store.dirty()"
+          (click)="store.reparse()"
+        >
+          Re-read stored analysis
+        </button>
+      </div>
+    }
+    @if (store.draft(); as draft) {
+      <fieldset [disabled]="!editable() || store.busy()" class="pdf-form">
+        <div class="pdf-fields">
+          <label
+            >Vote ID<input
+              [ngModel]="draft.voteId"
+              (ngModelChange)="store.setField('voteId', $event)"
+            /><small class="field-error">{{ store.fieldIssue('voteId') }}</small></label
           >
-            <span class="queue-copy"
-              ><strong>{{ item.fileName }}</strong
-              ><small>{{ item.status }} · {{ item.uploadedBy }}</small></span
-            >
-          </button>
-        }
-      </aside>
-      <section class="panel pdf-editor">
-        @if (store.selected(); as item) {
-          <div class="panel-heading">
-            <div>
-              <h3>{{ item.fileName }}</h3>
-              <span class="status-badge">{{ item.status }}</span
-              ><small> Version {{ item.version }}</small>
-            </div>
-            @if (store.sourceUrl()) {
-              <a class="text-button" [href]="store.sourceUrl()" [download]="item.fileName"
-                >Download original PDF</a
-              >
-            }
-          </div>
-          @if (store.error()) {
-            <p role="alert" class="field-error">{{ store.error() }}</p>
-          }
-          @if (store.notice()) {
-            <p role="status">{{ store.notice() }}</p>
-          }
-          @if (item.error) {
-            <p class="field-error">{{ item.error }}</p>
-          }
-          @if (item.status === 'Failed') {
-            <button
-              class="button button-primary"
-              [disabled]="store.busy()"
-              (click)="store.retry(item)"
-            >
-              Retry extraction
-            </button>
-          }
-          @if (item.status === 'Queued' || item.status === 'Running') {
-            <p role="status">
-              {{ item.progress?.phase ?? 'Queued' }} · {{ item.progress?.current ?? 0 }}. You can
-              leave this screen and return later.
+          <label
+            >Session<input
+              [ngModel]="draft.session"
+              (ngModelChange)="store.setField('session', $event)"
+            /><small class="field-error">{{ store.fieldIssue('session') }}</small></label
+          >
+          <label
+            >Vote date<input
+              type="date"
+              [ngModel]="draft.voteDate"
+              (ngModelChange)="store.setField('voteDate', $event)"
+            /><small class="field-error">{{ store.fieldIssue('voteDate') }}</small></label
+          >
+          <label
+            >Publication time (with time zone)<input
+              [ngModel]="draft.publishedAt"
+              (ngModelChange)="store.setField('publishedAt', $event)"
+              placeholder="YYYY-MM-DDTHH:mm:ssZ"
+            /><small class="field-error">{{ store.fieldIssue('publishedAt') }}</small></label
+          >
+          <label class="pdf-title-field"
+            >Resolution title<input
+              [ngModel]="draft.title"
+              (ngModelChange)="store.setField('title', $event)"
+            /><small class="field-error">{{ store.fieldIssue('title') }}</small></label
+          >
+        </div>
+        <h4>Printed totals · verify against the bottom of the original sheet</h4>
+        <div class="pdf-totals">
+          <label
+            >Yes<input
+              type="number"
+              min="0"
+              [ngModel]="draft.printedTotals?.yes"
+              (ngModelChange)="store.setTotal('yes', $event)"
+            /><small>Rows: {{ store.totals().yes }}</small></label
+          ><label
+            >No<input
+              type="number"
+              min="0"
+              [ngModel]="draft.printedTotals?.no"
+              (ngModelChange)="store.setTotal('no', $event)"
+            /><small>Rows: {{ store.totals().no }}</small></label
+          ><label
+            >Abstain<input
+              type="number"
+              min="0"
+              [ngModel]="draft.printedTotals?.abstain"
+              (ngModelChange)="store.setTotal('abstain', $event)"
+            /><small>Rows: {{ store.totals().abstain }}</small></label
+          ><label
+            >Absent<input
+              type="number"
+              min="0"
+              [ngModel]="draft.printedTotals?.absent"
+              (ngModelChange)="store.setTotal('absent', $event)"
+            /><small>Rows: {{ store.totals().absent }}</small></label
+          >
+        </div>
+        <small class="field-error"
+          >{{ store.fieldIssue('printedTotals') }} {{ store.fieldIssue('totalsMismatch') }}</small
+        >
+        <div class="pdf-issues" aria-live="polite">
+          @for (issue of globalIssues(); track $index) {
+            <p [class.field-error]="issue.severity === 'Error'">
+              <strong>{{ issue.severity }}</strong> · {{ issue.message }}
             </p>
           }
-          @if (sourcePreview(); as preview) {
-            <details class="pdf-source" open>
-              <summary>Original scanned sheet · page {{ store.sourcePage() }}</summary>
-              <iframe [src]="preview" title="Original PDF voting sheet"></iframe>
-            </details>
-          }
-          @if (store.draft(); as draft) {
-            <fieldset [disabled]="!editable() || store.busy()" class="pdf-form">
-              <div class="pdf-fields">
-                <label
-                  >Vote ID<input
-                    [ngModel]="draft.voteId"
-                    (ngModelChange)="store.setField('voteId', $event)"
-                  /><small class="field-error">{{ store.fieldIssue('voteId') }}</small></label
-                >
-                <label
-                  >Session<input
-                    [ngModel]="draft.session"
-                    (ngModelChange)="store.setField('session', $event)"
-                  /><small class="field-error">{{ store.fieldIssue('session') }}</small></label
-                >
-                <label
-                  >Vote date<input
-                    type="date"
-                    [ngModel]="draft.voteDate"
-                    (ngModelChange)="store.setField('voteDate', $event)"
-                  /><small class="field-error">{{ store.fieldIssue('voteDate') }}</small></label
-                >
-                <label
-                  >Publication time (with time zone)<input
-                    [ngModel]="draft.publishedAt"
-                    (ngModelChange)="store.setField('publishedAt', $event)"
-                    placeholder="2011-10-05T00:00:00Z"
-                  /><small class="field-error">{{ store.fieldIssue('publishedAt') }}</small></label
-                >
-                <label class="pdf-title-field"
-                  >Resolution title<input
-                    [ngModel]="draft.title"
-                    (ngModelChange)="store.setField('title', $event)"
-                  /><small class="field-error">{{ store.fieldIssue('title') }}</small></label
-                >
-              </div>
-              <h4>Printed totals · verify against the bottom of the original sheet</h4>
-              <div class="pdf-totals">
-                <label
-                  >Yes<input
-                    type="number"
-                    min="0"
-                    [ngModel]="draft.printedTotals?.yes"
-                    (ngModelChange)="store.setTotal('yes', $event)"
-                  /><small>Rows: {{ store.totals().yes }}</small></label
-                ><label
-                  >No<input
-                    type="number"
-                    min="0"
-                    [ngModel]="draft.printedTotals?.no"
-                    (ngModelChange)="store.setTotal('no', $event)"
-                  /><small>Rows: {{ store.totals().no }}</small></label
-                ><label
-                  >Abstain<input
-                    type="number"
-                    min="0"
-                    [ngModel]="draft.printedTotals?.abstain"
-                    (ngModelChange)="store.setTotal('abstain', $event)"
-                  /><small>Rows: {{ store.totals().abstain }}</small></label
-                ><label
-                  >Absent<input
-                    type="number"
-                    min="0"
-                    [ngModel]="draft.printedTotals?.absent"
-                    (ngModelChange)="store.setTotal('absent', $event)"
-                  /><small>Rows: {{ store.totals().absent }}</small></label
-                >
-              </div>
-              <small class="field-error"
-                >{{ store.fieldIssue('printedTotals') }}
-                {{ store.fieldIssue('totalsMismatch') }}</small
-              >
-              <div class="pdf-issues" aria-live="polite">
-                @for (issue of globalIssues(); track $index) {
-                  <p [class.field-error]="issue.severity === 'Error'">
-                    <strong>{{ issue.severity }}</strong> · {{ issue.message }}
-                  </p>
-                }
-              </div>
-              <div class="panel-heading">
-                <h4>Country ballots · {{ draft.rows.length }} rows</h4>
-                <button
-                  class="text-button"
-                  [disabled]="draft.rows.length >= 2000"
-                  (click)="store.addRow()"
-                >
-                  Add missing row
-                </button>
-              </div>
-              <div class="table-scroll pdf-row-table">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>SOURCE</th>
-                      <th>COUNTRY CODE</th>
-                      <th>COUNTRY NAME</th>
-                      <th>BALLOT</th>
-                      <th>REVIEW FLAGS</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    @for (row of draft.rows; track row.rowNumber) {
-                      <tr [class.pdf-flagged]="store.rowIssues(row.rowNumber).length > 0">
-                        <td>
-                          <button
-                            class="text-button"
-                            (click)="store.sourcePage.set(row.pageNumber || 1)"
-                          >
-                            Page {{ row.pageNumber || 'manual' }} · row {{ row.rowNumber }}</button
-                          ><small class="subcell">{{
-                            row.confidence === null
-                              ? 'Confidence unavailable'
-                              : (row.confidence * 100 | number: '1.0-0') + '% OCR confidence'
-                          }}</small>
-                        </td>
-                        <td>
-                          <input
-                            aria-label="Country code"
-                            maxlength="3"
-                            [ngModel]="row.countryCode"
-                            (ngModelChange)="store.setRow(row.rowNumber, 'countryCode', $event)"
-                          />
-                        </td>
-                        <td>
-                          <input
-                            aria-label="Country name"
-                            [ngModel]="row.countryName"
-                            (ngModelChange)="store.setRow(row.rowNumber, 'countryName', $event)"
-                          />
-                        </td>
-                        <td>
-                          <select
-                            aria-label="Ballot"
-                            [ngModel]="row.ballot"
-                            (ngModelChange)="store.setRow(row.rowNumber, 'ballot', $event)"
-                          >
-                            <option value="">Check marks</option>
-                            <option value="Y">Yes (Y)</option>
-                            <option value="N">No (N)</option>
-                            <option value="A">Abstain (A)</option>
-                            <option value="X">Absent (X)</option>
-                          </select>
-                        </td>
-                        <td>
-                          <small class="subcell">{{ row.sourceText }}</small>
-                          @for (issue of store.rowIssues(row.rowNumber); track $index) {
-                            <small
-                              class="subcell"
-                              [class.field-error]="issue.severity === 'Error'"
-                              >{{ issue.message }}</small
-                            >
-                          }
-                        </td>
-                        <td>
-                          <button class="text-button" (click)="store.removeRow(row.rowNumber)">
-                            Remove
-                          </button>
-                        </td>
-                      </tr>
+        </div>
+        <div class="panel-heading">
+          <h4>Country ballots · {{ draft.rows.length }} rows</h4>
+          <button
+            class="text-button"
+            [disabled]="draft.rows.length >= 2000"
+            (click)="store.addRow()"
+          >
+            Add missing row
+          </button>
+        </div>
+        <div class="table-scroll pdf-row-table">
+          <table>
+            <thead>
+              <tr>
+                <th>SOURCE</th>
+                <th>COUNTRY CODE</th>
+                <th>COUNTRY NAME</th>
+                <th>BALLOT</th>
+                <th>REVIEW FLAGS</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of draft.rows; track row.rowNumber) {
+                <tr [class.pdf-flagged]="store.rowIssues(row.rowNumber).length > 0">
+                  <td>
+                    <button class="text-button" (click)="store.sourcePage.set(row.pageNumber || 1)">
+                      Page {{ row.pageNumber || 'manual' }} · row {{ row.rowNumber }}</button
+                    ><small class="subcell">{{
+                      row.confidence === null
+                        ? 'Confidence unavailable'
+                        : (row.confidence * 100 | number: '1.0-0') + '% OCR confidence'
+                    }}</small>
+                  </td>
+                  <td>
+                    <input
+                      aria-label="Country code"
+                      maxlength="3"
+                      [ngModel]="row.countryCode"
+                      (ngModelChange)="store.setRow(row.rowNumber, 'countryCode', $event)"
+                    />
+                  </td>
+                  <td>
+                    <input
+                      aria-label="Country name"
+                      [ngModel]="row.countryName"
+                      (ngModelChange)="store.setRow(row.rowNumber, 'countryName', $event)"
+                    />
+                  </td>
+                  <td>
+                    <select
+                      aria-label="Ballot"
+                      [ngModel]="row.ballot"
+                      (ngModelChange)="store.setRow(row.rowNumber, 'ballot', $event)"
+                    >
+                      <option value="">Check marks</option>
+                      <option value="Y">Yes (Y)</option>
+                      <option value="N">No (N)</option>
+                      <option value="A">Abstain (A)</option>
+                      <option value="X">Absent (X)</option>
+                    </select>
+                  </td>
+                  <td>
+                    <small class="subcell">{{ row.sourceText }}</small>
+                    @for (issue of store.rowIssues(row.rowNumber); track $index) {
+                      <small class="subcell" [class.field-error]="issue.severity === 'Error'">{{
+                        issue.message
+                      }}</small>
                     }
-                  </tbody>
-                </table>
-              </div>
-              <label
-                >Decision note<input
-                  [ngModel]="store.note()"
-                  (ngModelChange)="store.note.set($event)"
-                  placeholder="Corrections and source review context"
-              /></label>
-              <label class="pdf-ack"
-                ><input
-                  type="checkbox"
-                  [ngModel]="store.acknowledged()"
-                  (ngModelChange)="store.acknowledged.set($event)"
-                />
-                I checked vote details, all ballots (including low-confidence and blank cells), and
-                printed totals against the source.</label
-              >
-            </fieldset>
-            @if (editable()) {
-              <div class="pdf-actions">
-                <button
-                  class="button button-quiet"
-                  [disabled]="store.busy()"
-                  (click)="store.save()"
-                >
-                  Save and validate draft</button
-                ><button
-                  class="button button-primary"
-                  [disabled]="store.busy() || !store.acknowledged()"
-                  (click)="store.save(true)"
-                >
-                  Approve and queue import</button
-                ><button
-                  class="button button-quiet"
-                  [disabled]="store.busy()"
-                  (click)="store.reject()"
-                >
-                  Reject draft
-                </button>
-              </div>
-            }
-            @if (item.reviewedBy) {
-              <p>
-                {{ item.status }} by {{ item.reviewedBy }} ·
-                {{ item.reviewedAt | date: 'medium' }} · {{ item.decisionNote }}
-              </p>
-            }
-            @if (item.importId) {
-              <p>
-                Linked CSV-validation import: <strong>{{ item.importId }}</strong
-                >. Its report is available in Data imports.
-              </p>
-            }
-          }
-        } @else {
-          <div class="compact-empty">Choose a PDF to inspect its source and extracted values.</div>
-        }
-      </section>
-    </div>
-  </section>
-}
+                  </td>
+                  <td>
+                    <button class="text-button" (click)="store.removeRow(row.rowNumber)">
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        <label
+          >Decision note<input
+            [ngModel]="store.note()"
+            (ngModelChange)="store.note.set($event)"
+            placeholder="Corrections and source review context"
+        /></label>
+        <label class="pdf-ack"
+          ><input
+            type="checkbox"
+            [ngModel]="store.acknowledged()"
+            (ngModelChange)="store.acknowledged.set($event)"
+          />
+          I checked vote details, all ballots (including low-confidence and blank cells), and
+          printed totals against the source.</label
+        >
+      </fieldset>
+      @if (editable()) {
+        <div class="pdf-actions">
+          <button class="button button-quiet" [disabled]="store.busy()" (click)="store.save()">
+            Save and validate draft</button
+          ><button
+            class="button button-primary"
+            [disabled]="store.busy() || !store.acknowledged()"
+            (click)="store.save(true)"
+          >
+            Approve and queue import</button
+          ><button class="button button-quiet" [disabled]="store.busy()" (click)="store.reject()">
+            Reject draft
+          </button>
+        </div>
+      }
+      @if (item.reviewedBy) {
+        <p>
+          {{ item.status }} by {{ item.reviewedBy }} · {{ item.reviewedAt | date: 'medium' }} ·
+          {{ item.decisionNote }}
+        </p>
+      }
+      @if (item.importId) {
+        <p>
+          Linked CSV-validation import: <strong>{{ item.importId }}</strong
+          >. Its report is available in Data imports.
+        </p>
+      }
+    }
+  } @else {
+    <div class="compact-empty">Choose a PDF to inspect its source and extracted values.</div>
+  }
+</section>

@@ -12,6 +12,9 @@ export class PdfUploadComponent {
   readonly workspace = inject(WorkspaceStore);
   async review(item: Parameters<PdfImportsStore['open']>[0]): Promise<void> {
     await this.store.open(item);
+    if (this.store.selected()?.id !== (item.originalExtractionId ?? item.id)) return;
+    this.workspace.reviewStore.reviewTab.set('extractions');
+    this.workspace.reviewStore.selectedReviewKind.set('pdf');
     await this.workspace.chooseSection('review');
   }
 }

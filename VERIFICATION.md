@@ -40,7 +40,7 @@ An initial synthetic volume run hit the test runner's three-minute cancellation 
 
 Live Key Vault authentication, Blob upload/read, Application Insights ingestion and Azure PostgreSQL connectivity have not been verified against the supplied Azure account. They require its configured credentials/access. The application continues to run locally in Docker.
 
-The ownership lock intentionally supports **one active Worker per database**. Distributed workers, lease expiry/fencing under network partitions, production identity, deployment and PDF extraction are outside this implementation. The tests are targeted regression evidence, not proof that every possible input or failure is covered. Historical reports created by older buggy code are not rewritten automatically; new processing and deferred-row decisions use the corrected paths.
+The ownership lock intentionally supports **one active Worker per database**. Distributed workers, lease expiry/fencing under network partitions, production identity and cloud deployment are outside this implementation. The optional PDF workflow is documented below. The tests are targeted regression evidence, not proof that every possible input or failure is covered. Historical reports created by older buggy code are not rewritten automatically; new processing and deferred-row decisions use the corrected paths.
 
 ## Structural refactor — 2026-10-23
 
@@ -59,3 +59,11 @@ The ownership lock intentionally supports **one active Worker per database**. Di
 - Angular: 11/11 tests passed. New tests render source-review warnings and approval acknowledgement, preserve edits after HTTP 422, and reject late responses from a previously selected PDF. Existing screen state and snapshot response-race tests still pass.
 - Read-only browser inspection confirmed that the updated Data imports screen loads with the PDF upload/history section. No PDF was uploaded to the real Azure resource, no OCR quality measurements were made, and no synthetic test files were sent outside the isolated test workflow. Real endpoint/authorization and evaluation against the six supplied scans remain necessary.
 - New C# feature files were formatted with Roslyn and checked for identical syntax tokens before/after formatting. Full-history CSV/snapshot benchmarks were not repeated; their earlier measurements remain recorded separately.
+
+## PDF parsing and unified review correction — 2026-10-24
+
+- Inspected persisted responses from the user's real Azure extraction without sending another Azure request. Merged member-name columns caused the first page to be skipped; checkbox-only empty rows were incorrectly interpreted as country identities. Parsing now respects column spans, removes checkbox tokens from identity fields, and calculates confidence from relevant identity/selected-mark spans.
+- Reparsed two untouched AwaitingReview drafts using the stored analysis, with optimistic concurrency, an audit record, and protection against replacing saved human edits. No draft was approved and no ballots were promoted.
+- MA_2011_042 now has 148 rows and matches printed totals: Y=70, N=55, A=7, X=16. MA_2007_015 has 149 extracted rows; ANT is unknown to the member seed and BEL/NIC have ambiguous extracted marks. These and the totals discrepancy still require human review. Publication timestamps remain explicit reviewer input.
+- Review has one left queue with Conflicts/Extractions/Resolved tabs and a right detail panel. Field errors are displayed beside their fields without repeated global messages. Browser inspection confirmed the layout and extracted rows.
+- Isolated PostgreSQL quick integration suite passed, including merged-column/empty-row parsing and safe reparse regressions. .NET build had zero warnings/errors. Angular tests: 12/12 passed. Generated-client drift check and Angular production build passed. Local API/Worker/Web containers were rebuilt with the existing application database preserved.

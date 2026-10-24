@@ -53,6 +53,8 @@ public sealed class PdfImportsController(IPdfImportService service) : ApiControl
     public async Task<IActionResult> Reject(Guid id, [FromBody] PdfDecisionRequest request, CancellationToken ct) => Map(await service.RejectAsync(id, request, Actor, HttpContext.TraceIdentifier, ct));
     [HttpPost("/api/v1/pdf-imports/{id:guid}/retry", Name = "RetryPdfImport")]
     public async Task<IActionResult> Retry(Guid id, [FromBody] PdfDecisionRequest request, CancellationToken ct) => Map(await service.RetryAsync(id, request, Actor, HttpContext.TraceIdentifier, ct));
+    [HttpPost("/api/v1/pdf-imports/{id:guid}/reparse",Name="ReparsePdfImport")]
+    public async Task<IActionResult> Reparse(Guid id,[FromBody]PdfDecisionRequest request,CancellationToken ct) => Map(await service.ReparseAsync(id,request,Actor,HttpContext.TraceIdentifier,ct));
     private string Actor => User.FindFirstValue(ClaimTypes.NameIdentifier)!;
 
     private IActionResult Map(PdfWriteResult result) => result.Applied ? Ok(result.Current) : ApiProblem(title: result.NotFound ? "PDF extraction not found" : result.Stale ? "PDF extraction changed" : "PDF review requires attention", detail: result.Error, statusCode: result.NotFound ? 404 : result.Stale ? 409 : 422, extensions: new Dictionary<string, object?> { { "issues", result.Issues }, { "current", result.Current } });

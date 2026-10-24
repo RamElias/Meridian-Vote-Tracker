@@ -23,6 +23,8 @@ import { ListPdfImports$Params } from '../fn/pdf-imports/list-pdf-imports';
 import { PdfExtraction } from '../models/pdf-extraction';
 import { rejectPdfDraft } from '../fn/pdf-imports/reject-pdf-draft';
 import { RejectPdfDraft$Params } from '../fn/pdf-imports/reject-pdf-draft';
+import { reparsePdfImport } from '../fn/pdf-imports/reparse-pdf-import';
+import { ReparsePdfImport$Params } from '../fn/pdf-imports/reparse-pdf-import';
 import { retryPdfImport } from '../fn/pdf-imports/retry-pdf-import';
 import { RetryPdfImport$Params } from '../fn/pdf-imports/retry-pdf-import';
 import { savePdfDraft } from '../fn/pdf-imports/save-pdf-draft';
@@ -245,6 +247,33 @@ export class PdfImportsService extends BaseService {
    */
   retryPdfImport(params: RetryPdfImport$Params, context?: HttpContext): Observable<PdfExtraction> {
     const resp = this.retryPdfImport$Response(params, context);
+    return resp.pipe(
+      map((r: StrictHttpResponse<PdfExtraction>): PdfExtraction => r.body)
+    );
+  }
+
+  /** Path part for operation `reparsePdfImport()` */
+  static readonly ReparsePdfImportPath = '/api/v1/pdf-imports/{id}/reparse';
+
+  /**
+   * This method provides access to the full `HttpResponse`, allowing access to response headers.
+   * To access only the response body, use `reparsePdfImport()` instead.
+   *
+   * This method sends `application/json` and handles request body of type `application/json`.
+   */
+  reparsePdfImport$Response(params: ReparsePdfImport$Params, context?: HttpContext): Observable<StrictHttpResponse<PdfExtraction>> {
+    const obs = reparsePdfImport(this.http, this.rootUrl, params, context);
+    return obs;
+  }
+
+  /**
+   * This method provides access only to the response body.
+   * To access the full response (for headers, for example), `reparsePdfImport$Response()` instead.
+   *
+   * This method sends `application/json` and handles request body of type `application/json`.
+   */
+  reparsePdfImport(params: ReparsePdfImport$Params, context?: HttpContext): Observable<PdfExtraction> {
+    const resp = this.reparsePdfImport$Response(params, context);
     return resp.pipe(
       map((r: StrictHttpResponse<PdfExtraction>): PdfExtraction => r.body)
     );
