@@ -1,30 +1,45 @@
-# Meridian Vote Tracker — Decisions
+# Design decisions
 
-**Status:** Core API/Worker flows and a four-area Angular UI for CSV imports, conflicts, positions, rankings, and publication are implemented and exercised against local PostgreSQL. Repeatable PostgreSQL/HTTP regression and Angular checks cover the core flows. This file summarizes the choices relevant to the assignment.
+## 1. Architecture and persistence
 
-## Architecture and data
+**One solution, separate API and Worker processes.** HTTP requests enqueue durable PostgreSQL jobs; the Worker performs imports, extraction and calculations. This keeps long work out of requests without introducing a broker. A database ownership lock allows one active Worker; multiple active Workers require leases/fencing. Throttled progress writes use separate short transactions so progress remains visible during processing.
 
-- ASP.NET Core 8+, Angular, PostgreSQL, and Docker Compose. A modular monolith shares one solution and database, with API and Worker in separate processes. PostgreSQL persists jobs and progress; one active Worker holds a database advisory ownership lock before startup recovery; additional instances fail rather than reset its jobs. A distributed multi-worker deployment still needs leases and fencing. Progress has its own table and throttled short writes outside work transactions. Angular services/models are generated from `src/Meridian.Api/openapi.json` using `npm run generate:api` and consumed by the UI facade.
-- HTTP routes use thin MVC Controllers with injected feature service interfaces and role policies. Shared code is grouped by feature (Contracts, Services, Processing), plus persistence/storage/configuration folders. API and Worker use shared DI registration. The existing Infrastructure assembly contains application orchestration and Npgsql persistence; separate Application/Domain assemblies are deferred until their boundaries justify more projects. Angular state belongs to four feature stores; the shell coordinates navigation and polling.
-- PostgreSQL is the source of truth. Use direct Npgsql access and versioned SQL migrations: the initial schema is relational and small enough to keep SQL explicit and easy to explain. Approved values are immutable versions with a current pointer and audit records; full event sourcing is unnecessary.
-- Docker Compose runs the app locally. Local PostgreSQL and persistent file storage are the defaults; configuration can instead select external Azure Database for PostgreSQL and Azure Blob. API and Worker read optional Key Vault settings using `DefaultAzureCredential`; local development supplies a bootstrap service-principal credential via ignored `.env`, while Azure-hosted workloads can use managed identity. Application Insights exports telemetry only when configured. No secrets are committed.
-- No Cosmos DB or runtime LLM. The PDF bonus uses Azure Document Intelligence `prebuilt-layout` (2024-11-30), matching the supplied table/mark layout. Preserve originals, raw analysis, extracted drafts, edited versions and decisions. Treat blank marks as review-sensitive absence; flag confidence below 0.85 or unavailable (a heuristic, not calibrated). Check country identity, duplicates, dates and printed totals. Human approval with optimistic concurrency atomically queues normal CSV validation; no extraction directly promotes data. Publication timestamps missing from scans require reviewer input. Bound service time and allow explicit retry; persist operation URLs for restart recovery.
-- Measure PDF quality on independently labelled supplied scans: metadata accuracy, country-row precision/recall, ballot accuracy (including blank/multiple marks), total discrepancies, confidence calibration and correction time. Include the corrigendum separately. Live Azure extraction accuracy remains unmeasured; regression tests use simulated responses.
+**MVC controllers and feature services with explicit Npgsql SQL.** Grouped SQL fits interleaved imports and large calculations, and keeps transaction boundaries visible. Versioned SQL migrations and constraints enforce invariants. The shared Infrastructure project contains both use-case orchestration and persistence: a deliberate packaging compromise. Separate Application/Domain assemblies and a generic repository would add boundaries that this scope does not yet need. Angular uses a generated OpenAPI client and feature-specific state stores.
 
-## Imports and conflicts
+## 2. Approved data, imports and history
 
-- Stage CSV rows before validation and promotion. A file can have interleaved rows for the same vote, and partial acceptance must preserve valid rows when others fail. Persist raw values, normalized values, normalization changes, classifications and the final report. Trim surrounding whitespace and canonicalize numeric sessions; ballot codes and dates remain strict. Promotion, classifications, report and import/job completion commit atomically to preserve original outcomes after a crash. Date decisions refresh affected reports in the same transaction.
-- Hashes prevent reprocessing identical files while retaining upload history. Compare overlapping files with approved data; add new country votes, never interpret absence as deletion, and attach new proposals to an existing open conflict.
-- `assembly_vote_id` identifies a vote. `(assembly_vote_id, country_code)` identifies a country ballot. Country identity is ISO 3166-1 alpha-3; a changed display name alone is not a conflict. Vote metadata conflicts and country-ballot conflicts are separate review items. Human decisions are audited; the first concurrent decision wins. Position edits require the version the user opened; stale writes return 409 with the current position. Rows whose membership validity depends on a pending vote-date conflict wait for that decision.
-- Membership intervals are inclusive, non-overlapping, and an empty end date means active membership. Seed country and membership data from the supplied `member_states.csv`.
+Stage the complete CSV before classification because a vote's rows may be scattered throughout the file. Preserve raw and normalized values, normalization changes and row outcomes. Trim surrounding whitespace and canonicalize numeric sessions; ballots and date formats remain strict. Valid rows survive other rows' failures. Promotion, classification, report and completion commit atomically; deferred date decisions refresh affected reports in their transaction.
 
-## Scoring and publication
+Approved values are **immutable versions with a current pointer**, source attribution and audit. This supports historical explanations without full event sourcing. Database triggers protect versions, audit and completed snapshots. A file hash prevents identical content from being processed twice while preserving upload history. Missing rows never imply deletion.
 
-- Alignment includes approved `Y` and `N` ballots only. Matching ballots add their weight to the numerator; all eligible `Y/N` ballots add weight to the denominator. `A`, `X`, non-membership, and missing ballots are excluded. A zero denominator is N/A.
-- Participation counts `Y/N/A` among approved ballots; `X` is absence. Coverage is approved country-vote records divided by selected votes during which the country was a member. Display one decimal place and preserve full calculation precision.
-- Snapshots store exact selected votes, input/version references, rule version, results, denominators, and per-country/per-vote contributions. Later edits never change prior snapshots. Results and Completed commit together; recovery reconciles the job acknowledgement without recalculation. Database triggers protect approved versions, audit and completed snapshot data; incomplete calculations can be cleared.
-- An administrator explicitly chooses publication year and quarter. Publication period is distinct from vote date range and actual publication time. At most one snapshot is active per period; replacement/removal is audited and preserves the old snapshot. Publication writes are serialized and unique-index errors during writes or commit roll back and return HTTP 409.
+Vote identity is `assembly_vote_id`; ballot identity is `(assembly_vote_id, country_code)`. ISO alpha-3 identifies a country, so a display-name change alone is not a conflict. Metadata and ballot conflicts are separate; new sources join an existing open item. First concurrent decision wins; stale decisions return 409. Position edits also require an expected version. Membership intervals are inclusive and cannot overlap; a blank end means active. Rows depending on a disputed vote date wait for resolution.
 
-## Scope and trade-offs
+## 3. Scoring and publication
 
-Authentication is simplified for the assignment; API authorization remains required for roles. Production still needs real user identity, deployment, backup/restore, security and load reviews, and retention policies. Before parallel development, agree on API contracts, generated client, formatting/analyzers, migration ownership, error format, UTC timestamps, tests, and review practices, then divide the next phase across four developers: (1) import and validation, (2) review, positions and audit, (3) Angular and generated client, (4) rankings, operations and integration tests.
+Only approved data is eligible. All metrics use the snapshot's selected votes and membership on each vote date.
+
+| Rule | Decision |
+|---|---|
+| Alignment | `100 × matching Y/N weight ÷ eligible Y/N weight`; exclude A, X, non-membership and missing ballots |
+| No eligible weight | N/A, never a fabricated zero |
+| Participation | Y/N/A count divided by approved ballot count; X counts as absence |
+| Coverage | Approved ballot count divided by selected votes during membership |
+| Presentation | One decimal place; retain calculation precision |
+
+A selection with missing positions fails explicitly; unknown explicit vote IDs are reported. Snapshots freeze selected votes, exact inputs/version references, rule version, results, denominators and per-country/per-vote contributions. Later changes cannot alter them. Results and completion commit together; recovery reconciles job acknowledgement.
+
+An Admin chooses publication year/quarter separately from data range and publication time. At most one snapshot is active per period. Replacement/withdrawal preserves the old snapshot and audit; concurrent publication is serialized and conflicting writes return 409.
+
+## 4. Azure and PDF extraction
+
+Compose runs locally with PostgreSQL and persistent local source storage. External Azure PostgreSQL, Blob, optional Key Vault configuration and Application Insights are implemented behind settings; their live account integration is unverified. Local vault access needs an external bootstrap credential. No secrets are committed. The provided Document Intelligence resource has been exercised on supplied scans. Cosmos DB adds no needed capability to this relational model; Azure OpenAI/Claude are unnecessary for the core or structured table extraction.
+
+The PDF bonus uses Document Intelligence `prebuilt-layout` without an LLM. Retain original PDFs, raw analysis, extracted/edited drafts and decisions. Validate identities, membership, duplicates, marks and totals. Blank marks propose X with a warning; confidence below 0.85 or unavailable prompts review. Human approval is mandatory and queues normal CSV validation atomically. Missing publication time requires reviewer input. Persist Azure operation URLs for recovery and bound execution time; retries can incur charges. Reparse stored analysis only when saved human edits will not be replaced.
+
+**Quality evaluation:** independently label all six supplied scans, including the corrigendum. Measure metadata accuracy, country-row precision/recall, ballot accuracy, printed-total discrepancies, confidence calibration and correction time. Two real responses exposed parser issues and informed regression fixtures; this is not a measured accuracy benchmark.
+
+## 5. Before production and the next team phase
+
+Replace demo identity with real authentication; define backup/restore, retention and operational monitoring; conduct security/load reviews. Introduce leases/fencing before multiple active Workers. Keep SQL transaction ownership explicit when splitting application/persistence assemblies.
+
+Before four developers work in parallel, agree on OpenAPI/client generation, migration ownership, ProblemDetails/correlation IDs, UTC timestamps, formatting and regression/review gates. Divide ownership: **(1)** imports/validation, **(2)** review/positions/audit, **(3)** Angular/generated client, **(4)** rankings/operations/integration tests. Review cross-feature contract and schema changes together.

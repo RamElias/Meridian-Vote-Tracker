@@ -1,143 +1,157 @@
 # Meridian Vote Tracker
 
-An ASP.NET Core 8, PostgreSQL, Angular and Docker Compose implementation of the Meridian Vote Tracker assignment. It supports durable imports, human conflict review, versioned positions and reproducible ranking snapshots. API and Worker run as separate processes, share feature services and apply versioned PostgreSQL migrations. Member states and membership periods are seeded from the supplied CSV.
+Meridian Vote Tracker helps a research institute manage Assembly voting data and publish country rankings based on its policy positions. Analysts can import CSV files, review corrections, resolve conflicting values, and trace each change to its source. Administrators set vote positions and weights and publish quarterly rankings. Each ranking is saved as a snapshot, so later corrections cannot change previously published results. The optional PDF workflow extracts proposed data from scanned voting sheets for human review.
 
-## Prerequisites
+**Technical overview:** ASP.NET Core 8 API and Worker, PostgreSQL 16, Angular, and Docker Compose. The API and Worker run as separate processes; PostgreSQL stores approved data, history, background jobs, and progress. The application runs locally, with optional Azure integrations configured through environment settings.
 
-- Docker Desktop with Docker Compose v2
-- The .NET 8 SDK for local builds and tests
-- Node.js 24.15+ and npm for local Angular development (the Compose build uses Node 24)
-- The supplied assignment files in a sibling folder named `Assignment-DotNet` (the Compose seed mount points to `../Assignment-DotNet/member_states.csv`)
+## 1. Run the application
 
-## Run locally
+**Prerequisite:** Docker Desktop running Linux containers, with Docker Compose. No local .NET SDK, Node.js, or WSL is required to run the application.
 
-From this directory in PowerShell:
+1. Place the supplied `member_states.csv` at `../Assignment-DotNet/member_states.csv`, relative to the repository:
 
-```powershell
-if (-not (Test-Path .env)) { Copy-Item .env.example .env }
-# Edit .env and replace the sample password with a local development password.
-docker compose up -d --build
+   ```text
+   parent/
+     Meridian-Vote-Tracker/
+     Assignment-DotNet/
+       member_states.csv
+   ```
+
+2. Open PowerShell in the repository root and create the local settings file:
+
+   ```powershell
+   if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+   ```
+
+3. Open `.env` and replace the sample `POSTGRES_PASSWORD` with a local password. Leave the Azure settings empty to run the core CSV workflow.
+
+4. Start the application:
+
+   ```powershell
+   docker compose up -d --build
+   ```
+
+5. Once startup completes, open **[localhost:4200](http://localhost:4200)**.
+
+The first build downloads dependencies. Startup applies migrations and loads countries, membership periods, and demo users automatically. Upload the vote CSV files through the application; they are not imported at startup.
+
+### Addresses and demo users
+
+| Service | Address |
+|---|---|
+| Angular application | [localhost:4200](http://localhost:4200) |
+| API health | [localhost:8080/health](http://localhost:8080/health) |
+| OpenAPI JSON | [localhost:8080/openapi/v1.json](http://localhost:8080/openapi/v1.json) |
+| PostgreSQL | `localhost:5432`, database/user `meridian`, password from `.env` |
+
+OpenAPI JSON is provided; there is no bundled Swagger UI. The frontend proxies `/api` requests through Nginx to the API.
+
+Use the user switcher in the application:
+
+| User | Role | Actions |
+|---|---|---|
+| Dana / Omer | Analyst | Upload, review conflicts/PDFs, create and inspect snapshots |
+| Lana | Admin | Analyst actions plus editing positions/weights and publishing/withdrawing snapshots |
+
+Direct API calls use `X-Demo-User: dana`, `omer`, or `lana`. This is demo identity; role permissions are enforced by the API.
+
+## 2. Suggested review walkthrough
+
+Start with a fresh application database for the complete sequence. Existing uploads and decisions remain in history across restarts.
+
+1. **Data imports — original file.** As Dana, upload `assembly_export_2024_q1.csv`. Watch persisted progress, then open the history row to inspect the report and row classifications. Valid rows can be accepted even when other rows are invalid.
+2. **Data imports — corrected file.** Upload `assembly_export_2024_q1_rev2.csv`. New records are added; changes to approved values become review items. Uploading identical content again records a duplicate without processing it again.
+3. **Conflict review.** Use **Conflicts**, select an item on the left, and compare values and sources on the right. Accept a proposal or reject it with an optional note. **Resolved** retains the decision. A competing decision receives a conflict response instead of overwriting it.
+4. **Vote positions.** Switch to Lana. Inspect a vote, its country ballots and timeline; assign a Yes/No position and weight from 1 to 5.
+5. **Rankings & snapshots.** Create a snapshot using an explicit vote ID for which you just set a position. Larger selections require positions for every selected vote. Inspect the ranking and a country's contributions, then publish as Lana for an explicit year/quarter.
+6. **Verify history.** Change a position or approve a later correction, then reopen the old snapshot: its stored inputs and results remain unchanged. A new snapshot uses the updated data.
+
+For the historical dataset, upload `assembly_historic.csv` and allow the background job to finish. Progress survives page refresh. Vote filters and an explicit ID list are combined as an intersection when both are supplied.
+
+## 3. Architecture at a glance
+
+```text
+Browser → Angular / Nginx (:4200) → ASP.NET Core API (:8080)
+                                         ↓
+                                    PostgreSQL
+                                         ↑
+                               Independent .NET Worker
+API and Worker → shared persistent source-file storage
 ```
 
-The Angular app publishes at <http://localhost:4200> and proxies API requests to the backend at <http://localhost:8080>. Health is at `/health`, metadata at `/api/v1/meta`, and the OpenAPI document at `/openapi/v1.json`. Docker Compose runs the application locally. PostgreSQL and import-file storage default to local services; telemetry export is disabled until configured; Azure resources are optional external services selected by configuration.
+| Project | Responsibility |
+|---|---|
+| `src/Meridian.Api` | MVC controllers, authentication/authorization, correlation IDs, HTTP errors and OpenAPI |
+| `src/Meridian.Worker` | Durable background import, extraction and calculation jobs |
+| `src/Meridian.Infrastructure` | Feature services/processors, explicit Npgsql SQL, migrations and storage adapters |
+| `src/Meridian.Web` | Angular feature pages/stores and generated API client |
 
-## Azure Key Vault
+PostgreSQL stores jobs, progress, approved versions, audit, and frozen snapshots. One active Worker owns the database's work queue. SQL migrations run at startup. Source files persist in a Compose volume by default. Errors use ProblemDetails and correlation IDs; full internal exceptions stay in JSON logs. See [ARCHITECTURE.md](ARCHITECTURE.md) for code navigation and [DECISIONS.md](DECISIONS.md) for trade-offs and scoring rules.
 
-The API and Worker optionally load configuration from Azure Key Vault when `AZURE_KEY_VAULT_URI` is set to the vault's HTTPS URI. Both processes use `DefaultAzureCredential`. For a workload that runs in Azure, use a system-assigned or user-assigned managed identity and grant it the **Key Vault Secrets User** role. For local Docker Compose, use a local development service principal with the required access and put its `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET` in the ignored `.env` file. The bootstrap credential must be supplied outside the vault because it is needed to open the vault. Leave the vault URI unset to use only local settings.
+## 4. Run the tests
 
-Store the PostgreSQL connection string as a Key Vault secret named `ConnectionStrings--Meridian`; the `--` separator maps to the .NET configuration key `ConnectionStrings:Meridian`. A Key Vault value overrides Compose's default local PostgreSQL connection. Alternatively, set `MERIDIAN_CONNECTION_STRING` in `.env` to use an external PostgreSQL server directly. For Azure Database for PostgreSQL, use its required TLS settings and grant the configured database user access to the schema. The local PostgreSQL container remains available for the default development setup.
+### Backend: real PostgreSQL, Docker only
 
-To store original imports in Azure Blob, set `STORAGE_PROVIDER=AzureBlob`, `AZURE_BLOB_SERVICE_URI=https://<account>.blob.core.windows.net`, and (if needed) `AZURE_BLOB_CONTAINER`. Create the container first and grant the local service principal **Storage Blob Data Contributor** on it. Alternatively, store the storage connection string in Key Vault as `Storage--AzureBlob--ConnectionString`. API and Worker share the same provider configuration, so both can upload/read the same files. Keep `STORAGE_PROVIDER=Local` to use the persistent Compose volume. Keep this provider stable for a database's import history; changing it requires migrating stored files and their storage keys.
-
-Set `APPLICATIONINSIGHTS_CONNECTION_STRING` to enable Application Insights telemetry for both API and Worker, or store it in Key Vault as `ApplicationInsights--ConnectionString`. When it is empty, telemetry export stays disabled. Resource credentials and connection strings must remain in ignored `.env` or Key Vault, never in source control.
-
-The principal API flows are:
-
-- **Imports:** `POST /api/v1/imports` with multipart field `file`; poll `GET /api/v1/imports/{id}` and page results with `GET /api/v1/imports/{id}/rows`. `GET /api/v1/imports` returns history. Rows are staged, validated, classified, and promoted independently where valid.
-- **Conflicts:** `GET /api/v1/conflicts`; resolve with `POST /api/v1/conflicts/{id}/decision` using `Accept` plus `proposalIndex`, or `Reject`, and an optional note. Concurrent decisions use first-write-wins.
-- **Votes and positions:** `GET /api/v1/votes` supports search/session/date filters. Vote IDs contain slashes, so details use `GET /api/v1/vote?voteId=...`; set a position with `PUT /api/v1/vote/position?voteId=...`. Position changes require the Admin demo user.
-- **Snapshots:** `POST /api/v1/snapshots` accepts a session, date range, or explicit `voteIds`; poll `GET /api/v1/snapshots/{id}`, fetch results and per-country contributions, then publish or withdraw as Admin. A snapshot requires a position for every selected vote.
-
-API v1 uses the seeded demo identities through `X-Demo-User` (`dana`, `omer`, or `lana`); `lana` is the Admin. This is assignment/demo authentication, not production identity.
-
-## PDF extraction bonus
-
-The **Data imports** page includes PDF upload/history; **Conflict review** includes a separate PDF queue, original-source preview, editable vote fields, country ballots, printed totals and source-review flags. Nothing extracted becomes approved vote data until an analyst approves the draft. Approval queues the existing CSV validation/classification flow, so overlapping/corrected PDFs use the same conflict rules. The source PDF, raw Azure response, original extracted draft, edits and reviewer attribution are retained.
-
-Configure the provided **Azure Document Intelligence** resource:
-
-- Set `DOCUMENT_INTELLIGENCE_ENDPOINT=https://<resource>.cognitiveservices.azure.com` in the ignored `.env`, or Key Vault secret `DocumentIntelligence--Endpoint`.
-- Prefer the existing service principal/managed identity with the resource's **Cognitive Services User** role. For key authentication, store its key as `DocumentIntelligence--ApiKey` in Key Vault. `DOCUMENT_INTELLIGENCE_API_KEY` in ignored `.env` is an alternative; do not commit its value.
-- Both API and Worker receive the same configuration. Run `docker compose up -d --build` after changing it. API/Worker stay local in Docker; only extraction calls the Azure resource.
-- Without a configured endpoint, the core CSV flows continue to work and PDF uploads return a clear setup message.
-
-Supported scope: the supplied Record of Vote table layout, PDF up to 20 MB, at most 20 pages in the returned analysis and 2,000 country rows. The deterministic adapter recognizes labelled vote metadata and Code/Member state/YES/NO/ABST tables, including side-by-side tables. It does not guess country codes from names. Unknown/multiple marks require correction; blank cells are proposed as `X` with a warning. All four printed totals must match the reviewed rows. Non-membership is flagged before review and is rejected by the normal CSV validator afterward. Supply the publication timestamp explicitly: these scans do not print one, and upload time is not substituted for it.
-
-The service uses [`prebuilt-layout`](https://learn.microsoft.com/azure/ai-services/document-intelligence/prebuilt/layout) via the [2024-11-30 binary REST API](https://learn.microsoft.com/rest/api/aiservices/document-models/analyze-document-from-stream?view=rest-aiservices-v4.0+%282024-11-30%29), without an LLM. Confidence below 0.85 or unavailable is a review flag, not an accuracy guarantee. Every approval requires source-review acknowledgement. Concurrent edits/decisions return 409 with current state. Failed or timed-out jobs expose a safe message and correlation reference and can be retried from history. The default timeout is 300 seconds (`DocumentIntelligence:TimeoutSeconds`, capped at 600). A restarted Worker resumes a persisted operation URL; an explicit retry submits a new analysis and can incur another Azure charge. A crash after Azure accepts a request but before its operation URL is saved can also cause resubmission.
-
-The PostgreSQL suite covers the full local workflow with simulated Azure responses, including a recording HTTP handler for headers/binary upload, concurrency, failure, timeout and restart. It does **not** measure real OCR accuracy or confirm Azure credentials. Evaluate the six supplied scans manually against independently labelled expected metadata/ballots and their printed totals, including the corrigendum, before claiming extraction quality. No synthetic test documents are sent to Azure.
-
-## Project layout
-
-- `src/Meridian.Api` — feature Controllers, authentication, request middleware and OpenAPI
-- `src/Meridian.Worker` — independent background process
-- `src/Meridian.Infrastructure` — feature contracts/services/processors, storage adapters, PostgreSQL bootstrap and SQL migrations
-- `src/Meridian.Web` — Angular feature pages with separate state stores and Nginx API proxy
-- `docker-compose.yml` — PostgreSQL, API, Worker and Angular/Nginx Web
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the folder tree, request flow, service responsibilities and design trade-offs.
-
-Database migrations are applied at startup and recorded in `schema_migrations`. The initial migration enforces ISO alpha-3 state codes and non-overlapping, inclusive membership periods. Seed loading is repeatable.
-
-## Current implementation status
-
-The API/Worker foundation, durable CSV upload and staging, validation/classification, immutable promotion versions, pending conflict creation and audited decisions, vote positions, ranking snapshots, contribution details, publication, demo-user attribution, OpenAPI contracts, and the Angular dashboard for the four core workflows are implemented. Docker Compose builds and runs the Web, API, Worker, and PostgreSQL services. PostgreSQL smoke and end-to-end import-to-snapshot checks have been run locally; the Angular build and unit tests also pass.
-
-## Assignment material
-
-`DECISIONS.md` records domain and architecture choices. `AI_USAGE.md` describes AI assistance used in this implementation.
-
-
-## PostgreSQL integration smoke test
-
-With Compose running and the seed complete, set `MERIDIAN_TEST_CONNECTION_STRING` to the local PostgreSQL connection string and run the real-PostgreSQL smoke test. In PowerShell, you can read the password from `.env` without printing it:
+From the repository root in PowerShell:
 
 ```powershell
-$passwordLine = Get-Content .env | Where-Object { $_ -match '^POSTGRES_PASSWORD=' } | Select-Object -First 1
-$password = $passwordLine -replace '^POSTGRES_PASSWORD=', ''
-$env:MERIDIAN_TEST_CONNECTION_STRING = "Host=localhost;Port=5432;Database=meridian;Username=meridian;Password=$password"
-dotnet run --project tests/Meridian.PostgresSmoke
-```
-
-The smoke test connects to PostgreSQL, checks that migration and seed data are present, and verifies that PostgreSQL rejects overlapping membership periods. It was run successfully in the development environment. Do not commit `.env` or connection strings.
-
-## CSV parser smoke test
-
-Run the parser check against the supplied Q1 file:
-
-```powershell
-dotnet run --project tests/Meridian.CsvSmoke -- ../Assignment-DotNet/assembly_export_2024_q1.csv
-```
-
-It checks quoted fields, the expected record count, and recovery after the malformed five-field row present in the supplied CSV. The importer must preserve and report that row while continuing with subsequent rows.
-
-## Angular checks
-
-For a local client-only build and unit tests:
-
-```powershell
-cd src/Meridian.Web
-npm ci
-npm run build
-npm test -- --watch=false
-```
-
-
-## Repeatable PostgreSQL and HTTP regression suite
-
-The suite creates a uniquely named temporary database, applies all migrations, runs the real processors and a real HTTP API, then drops only that temporary database. Its database account needs CREATEDB permission. It covers interleaved/overlapping/duplicate imports, normalization, membership boundaries, deferred-date reports, concurrent conflict decisions, stale positions, API roles, OpenAPI responses, snapshot metrics/immutability, concurrent publication and recovery after cancellation.
-
-With Docker only (no host .NET SDK required):
-
-```powershell
+$env:MERIDIAN_TEST_ARGS = '--quick'
 docker compose -p meridian-tests -f docker-compose.tests.yml up --abort-on-container-exit --exit-code-from integration-tests
+# After inspecting the result:
 docker compose -p meridian-tests -f docker-compose.tests.yml down -v
 ```
 
-This uses an isolated PostgreSQL service with no published port or application volume. The default scale case calculates 975,000 contributions (6,500 votes × 150 countries). Set `MERIDIAN_TEST_ARGS=--quick` for the smaller 101-vote case.
+Success ends with `PASS: integration suite` and `integration-tests ... exited with code 0`. The suite builds .NET inside Docker and uses a separate PostgreSQL service with no application volumes or published ports. It starts real API/Worker processes and tests imports, concurrency, authorization, snapshots, publication, recovery, and PDF review with simulated Azure responses. Some PostgreSQL errors are deliberately triggered to verify failure handling; the runner's exit code determines success.
 
-With the .NET 8 SDK and `MERIDIAN_TEST_CONNECTION_STRING` pointing to a disposable PostgreSQL server:
+The quick scale case uses 101 votes. For the larger 6,500-vote / 975,000-contribution case, set `$env:MERIDIAN_TEST_ARGS = '--large'` and repeat the same commands.
+
+### Frontend and API client
+
+Requires Node.js 24.15+ and npm. From the repository root:
 
 ```powershell
-dotnet build Meridian.VoteTracker.sln
-dotnet run --no-build --project tests/Meridian.IntegrationTests
-dotnet run --no-build --project tests/Meridian.IntegrationTests -- --large
-# Optional measurement using the original assignment files:
-dotnet run --no-build --project tests/Meridian.IntegrationTests -- --historic ../Assignment-DotNet/assembly_historic.csv ../Assignment-DotNet/member_states.csv
+cd src/Meridian.Web
+npm.cmd ci
+npm.cmd test -- --watch=false
+npm.cmd run check:api
+npm.cmd run build
+npm.cmd audit
 ```
 
-The API contract is `src/Meridian.Api/openapi.json`. After changing it, run `npm run generate:api` and `npm run check:api` in `src/Meridian.Web`. The integration suite validates actual HTTP response shapes against this contract. Angular tests include late-response protection when switching contribution country or snapshot.
+`npm.cmd` works in PowerShell without enabling script execution; other shells can use `npm`. The client check regenerates into a temporary directory and detects drift from the checked-in OpenAPI contract. After an intentional contract change, use `npm.cmd run generate:api` and review the generated changes.
 
-Progress is reported as Reading, Staging, Validating, Promoting or Calculating, with a phase counter and unit. Internal errors show a safe message and correlation ID; the exception and correlation scope remain in JSON console logs. For position writes, send `expectedVersionId` (null for the first position); stale versions receive HTTP 409 and `currentPosition`. Unknown explicit snapshot vote IDs receive HTTP 422 with `unknownVoteIds`.
+Latest local checks: **12 Angular tests passed**, PostgreSQL quick integration suite passed, client consistency and production build passed, and `npm audit` reported zero known vulnerabilities after the Vite override. Detailed evidence, historical volume measurements, and limits are in [VERIFICATION.md](VERIFICATION.md). Backend checks use executable regression runners (`dotnet run`), not a `dotnet test` framework.
 
-See `VERIFICATION.md` for the performed checks and their limits. Azure provider code is implemented, but live Key Vault, Blob, telemetry ingestion and Azure PostgreSQL connectivity require environment credentials and have not been verified against the supplied Azure account.
+## 5. Azure configuration and PDF bonus
+
+The application runs locally in Docker, as required for this submission. Containerized API, Worker and Web services, together with configurable Azure PostgreSQL, Blob Storage, Key Vault and Application Insights integrations, provide a foundation for future Azure deployment. That deployment would still require choosing hosting services, configuring identities/network access and setting up a deployment pipeline; it has not been implemented or verified. Put credentials only in ignored `.env` or Key Vault. Never commit `.env`.
+
+| Capability | Settings in `.env` | Default / access |
+|---|---|---|
+| External PostgreSQL | `MERIDIAN_CONNECTION_STRING` | Local Compose PostgreSQL; external connection needs database access and appropriate TLS settings |
+| Key Vault configuration | `AZURE_KEY_VAULT_URI`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` | Disabled; local service principal needs **Key Vault Secrets User** |
+| Blob source storage | `STORAGE_PROVIDER=AzureBlob`, `AZURE_BLOB_SERVICE_URI`, `AZURE_BLOB_CONTAINER` | Persistent local volume; create the container and grant **Storage Blob Data Contributor** |
+| Application Insights | `APPLICATIONINSIGHTS_CONNECTION_STRING` | Telemetry export disabled |
+| PDF extraction | `DOCUMENT_INTELLIGENCE_ENDPOINT`, `DOCUMENT_INTELLIGENCE_API_KEY` | Disabled without endpoint; alternatively use the configured identity with **Cognitive Services User** |
+
+Key Vault uses `DefaultAzureCredential`. For local Docker, the service-principal bootstrap credential must come from outside the vault. Secret names map `--` to `:`: `ConnectionStrings--Meridian`, `Storage--AzureBlob--ConnectionString`, `ApplicationInsights--ConnectionString`, `DocumentIntelligence--Endpoint`, and `DocumentIntelligence--ApiKey`. Vault values override corresponding local configuration. API and Worker must use the same settings. Recreate them with `docker compose up -d --build` after configuration changes. Changing the storage provider for existing history requires migrating the stored files.
+
+### Try the PDF workflow
+
+1. Configure the Document Intelligence endpoint and credential, then recreate the containers.
+2. Upload a supplied scan in **Data imports**; follow it in **Conflict review → Extractions**.
+3. Compare the original PDF with the editable draft. Correct flagged metadata/ballots and verify all four printed totals. Enter the source publication timestamp explicitly when absent from the scan; upload time is not substituted.
+4. Save and approve after acknowledging source review. Approval queues the normal CSV validation/conflict flow; it does not bypass it. Rejected/accepted drafts remain available under **Resolved**.
+
+The adapter uses `prebuilt-layout`, API version `2024-11-30`, without an LLM. Supported scope is the supplied Record of Vote layout, up to 20 MB, 20 returned pages, and 2,000 country rows. Blank marks propose absence with a warning; unknown or multiple marks require review. Confidence is a heuristic, not an accuracy guarantee.
+
+Failed jobs can be retried; retries can incur another Azure charge. Restart resumes a persisted operation, but a crash between Azure acceptance and saving its operation URL can cause resubmission. **Re-read stored analysis** reuses an existing response without another Azure call and refuses to replace saved human edits.
+
+## 6. Limits and operating notes
+
+- Demo identity is not production authentication. Only one active Worker per database is supported.
+- Real Document Intelligence responses were inspected for two supplied scans; extraction accuracy across all six scans has not been independently measured. Automated PDF tests simulate Azure responses. Live Key Vault, Blob, Application Insights ingestion and Azure PostgreSQL connectivity have not been verified against the supplied account.
+- Before production, add real user identity, backup/restore and retention policies, and complete load/security validation. The existing containers and Azure configuration adapters provide a starting point for future Azure deployment, rather than a completed deployment setup.
+- Stop the application with `docker compose down`; its named volumes remain. For startup problems, inspect `docker compose ps` and `docker compose logs --tail=100 api worker` before retrying. Do not share credentials from local logs/configuration.
+
+[Design decisions](DECISIONS.md) · [AI usage](AI_USAGE.md) · [Architecture](ARCHITECTURE.md) · [Verification evidence](VERIFICATION.md)
