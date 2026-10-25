@@ -153,9 +153,16 @@
         <span class="section-kicker">SNAPSHOT DETAIL · {{ snapshot.ruleVersion }}</span>
         <h2>{{ snapshot.status === 'Completed' ? 'Ranking results' : snapshot.status }}</h2>
       </div>
-      <span class="status-badge" [class]="'status-badge ' + statusClass(snapshot.status)">{{
-        snapshot.status
-      }}</span>
+      <div class="snapshot-detail-actions">
+        @if (snapshot.status === 'Completed') {
+          <button class="button button-quiet" type="button" (click)="openContributionDialog()">
+            View contribution details
+          </button>
+        }
+        <span class="status-badge" [class]="'status-badge ' + statusClass(snapshot.status)">{{
+          snapshot.status
+        }}</span>
+      </div>
     </div>
     @if (snapshot.status === 'Queued' || snapshot.status === 'Running') {
       <div class="job-progress">
@@ -204,10 +211,14 @@
                 max="9999"
                 [ngModel]="publicationYear()"
                 (ngModelChange)="publicationYear.set($event)"
+                class="publication-year"
+                [disabled]="busy()"
                 aria-label="Publication year"
               /><select
                 [ngModel]="publicationQuarter()"
                 (ngModelChange)="publicationQuarter.set($event)"
+                class="publication-quarter"
+                [disabled]="busy()"
                 aria-label="Publication quarter"
               >
                 <option [ngValue]="1">Q1</option>
@@ -229,6 +240,9 @@
               >
                 Publish
               </button>
+              @if (fieldErrors()['publicationQuarter']) {
+                <small class="field-error">{{ fieldErrors()['publicationQuarter'] }}</small>
+              }
               @if (fieldErrors()['publicationYear']) {
                 <small class="field-error">{{ fieldErrors()['publicationYear'] }}</small>
               }
@@ -282,10 +296,15 @@
                   <span class="rank-number">{{ result.rank ?? '—' }}</span>
                 </td>
                 <td>
-                  <span class="country-cell"
-                    ><strong>{{ result.countryName }}</strong
-                    ><small>{{ result.countryCode }}</small></span
+                  <button
+                    class="country-detail-button country-cell"
+                    type="button"
+                    (click)="openContributionDialog(result.countryCode)"
+                    [attr.aria-label]="'View contributions for ' + result.countryName"
                   >
+                    <strong>{{ result.countryName }}</strong
+                    ><small>{{ result.countryCode }} · View details ↗</small>
+                  </button>
                 </td>
                 <td>
                   <div class="metric-cell">
@@ -320,75 +339,139 @@
           </button>
         </div>
       }
-      <div class="contribution-search">
-        <div>
-          <span class="section-kicker">CONTRIBUTION DETAIL</span
-          ><strong>Inspect a country's vote-by-vote calculation</strong>
-        </div>
-        <label
-          ><input
-            maxlength="3"
-            [ngModel]="countryCode()"
-            (ngModelChange)="setCountryCode($event)"
-            placeholder="USA"
-          /><button class="button button-quiet" type="button" (click)="loadContributions()">
-            Show detail
-          </button></label
-        >
-      </div>
-      @if (fieldErrors()['countryCode']) {
-        <small class="field-error">{{ fieldErrors()['countryCode'] }}</small>
-      }
-      @if (contributions().length) {
-        <div class="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>VOTE</th>
-                <th>DATE</th>
-                <th>INSTITUTE POSITION</th>
-                <th>COUNTRY BALLOT</th>
-                <th>ALIGNMENT CREDIT</th>
-                <th>MEMBER</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (entry of contributions(); track entry.ordinal) {
-                <tr>
-                  <td>
-                    <strong>{{ entry.voteId }}</strong
-                    ><small class="subcell">{{ entry.title }}</small>
-                  </td>
-                  <td>{{ entry.voteDate | date: 'mediumDate' }}</td>
-                  <td>{{ stanceLabel(entry.instituteStance) }} · ×{{ entry.weight }}</td>
-                  <td>
-                    <span class="ballot-pill">{{ ballotLabel(entry.ballot) }}</span>
-                  </td>
-                  <td>
-                    <strong
-                      >{{ entry.alignmentNumerator | number }} /
-                      {{ entry.alignmentDenominator | number }}</strong
-                    >
-                  </td>
-                  <td>{{ entry.memberAtVote ? 'Yes' : 'No' }}</td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        </div>
-      }
-      @if (contributionsHasMore()) {
-        <div class="pagination-footer">
-          <button
-            class="button button-quiet"
-            type="button"
-            [disabled]="contributionsLoading()"
-            (click)="loadMoreContributions()"
-          >
-            Load more contributions
-          </button>
-        </div>
-      }
     }
   </section>
+}
+
+@if (contributionDialogOpen()) {
+  <app-modal
+    title="Country contribution details"
+    [wide]="true"
+    (closed)="closeContributionDialog()"
+  >
+    <p class="dialog-context">
+      Snapshot created {{ selectedSnapshot()?.createdAt | date: 'medium' }} ·
+      {{ selectedSnapshot()?.selectedVoteCount }} selected vote{{
+        selectedSnapshot()?.selectedVoteCount === 1 ? '' : 's'
+      }}
+      · Stored calculation inputs
+    </p>
+    <div class="contribution-search">
+      <div>
+        <span class="section-kicker">CONTRIBUTION DETAIL</span
+        ><strong>Inspect a country's vote-by-vote calculation</strong>
+      </div>
+      <label
+        ><input
+          maxlength="3"
+          [ngModel]="countryCode()"
+          (ngModelChange)="setCountryCode($event)"
+          placeholder="FRA"
+          aria-label="Country code"
+          list="contribution-countries"
+          autofocus
+        /><button
+          class="button button-quiet"
+          type="button"
+          [disabled]="contributionsLoading()"
+          (click)="loadContributions()"
+        >
+          Show detail
+        </button></label
+      >
+    </div>
+    <datalist id="contribution-countries">
+      @for (country of snapshotResults(); track country.countryCode) {
+        <option [value]="country.countryCode">{{ country.countryName }}</option>
+      }
+    </datalist>
+    @if (fieldErrors()['countryCode']) {
+      <small class="field-error">{{ fieldErrors()['countryCode'] }}</small>
+    }
+    @if (contributionsError()) {
+      <div class="alert alert-error" role="alert">{{ contributionsError() }}</div>
+    }
+    @if (contributionsLoading()) {
+      <p class="dialog-state" role="status">Loading contributions…</p>
+    }
+    @if (contributionsLoaded() && !contributionsLoading() && !contributions().length) {
+      <p class="dialog-state">No contributions were found for this country.</p>
+    }
+    @if (contributions().length) {
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>VOTE</th>
+              <th>DATE</th>
+              <th>INSTITUTE POSITION</th>
+              <th>COUNTRY BALLOT</th>
+              <th>ALIGNMENT CREDIT</th>
+              <th>MEMBER</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (entry of contributions(); track entry.ordinal) {
+              <tr>
+                <td>
+                  <strong>{{ entry.voteId }}</strong
+                  ><small class="subcell">{{ entry.title }}</small>
+                </td>
+                <td>{{ entry.voteDate | date: 'mediumDate' }}</td>
+                <td>{{ stanceLabel(entry.instituteStance) }} · ×{{ entry.weight }}</td>
+                <td>
+                  <span class="ballot-pill">{{ ballotLabel(entry.ballot) }}</span>
+                </td>
+                <td>
+                  <strong
+                    >{{ entry.alignmentNumerator | number }} /
+                    {{ entry.alignmentDenominator | number }}</strong
+                  >
+                </td>
+                <td>{{ entry.memberAtVote ? 'Yes' : 'No' }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+    @if (contributionsHasMore()) {
+      <div class="pagination-footer">
+        <button
+          class="button button-quiet"
+          type="button"
+          [disabled]="contributionsLoading()"
+          (click)="loadMoreContributions()"
+        >
+          Load more contributions
+        </button>
+      </div>
+    }
+  </app-modal>
+}
+@if (publicationConflict(); as conflict) {
+  <app-modal title="Publication could not be completed" (closed)="publicationConflict.set(null)">
+    <p>
+      A snapshot is already published for
+      <strong>{{ conflict.year }} Q{{ conflict.quarter }}</strong
+      >, or the publication state changed while this request was being processed.
+    </p>
+    <p>
+      Review the active snapshot. To replace it, close this window, select
+      <strong>Replace active</strong> and publish again. The previous snapshot will remain in
+      history.
+    </p>
+    <details class="dialog-technical">
+      <summary>Technical details</summary>
+      <p>{{ conflict.detail }}</p>
+      @if (conflict.reference) {
+        <small>Reference: {{ conflict.reference }}</small>
+      }
+    </details>
+    <div class="dialog-actions">
+      <button class="button button-primary" type="button" (click)="publicationConflict.set(null)">
+        Back to snapshot
+      </button>
+    </div>
+  </app-modal>
 }

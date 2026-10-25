@@ -13,7 +13,7 @@ AI was used throughout development, including substantial implementation work. I
 - Ran Angular tests for screen state, PDF review and late asynchronous responses; checked generated-client consistency with OpenAPI.
 - Exercised workflows manually in the UI/API and inspected results from supplied CSV files and real PDF extractions.
 
-The latest local checks passed: PostgreSQL quick integration suite, 20 Angular tests, generated-client consistency and production build. Detailed scale measurements and testing limitations belong in VERIFICATION.md rather than this usage summary. Tests are evidence for the covered scenarios, not proof of correctness for every input.
+The latest local checks passed: PostgreSQL quick integration suite, 27 Angular tests, generated-client consistency and production build. Detailed scale measurements and testing limitations belong in VERIFICATION.md rather than this usage summary. Tests are evidence for the covered scenarios, not proof of correctness for every input.
 
 ## Examples where AI-assisted output was corrected
 

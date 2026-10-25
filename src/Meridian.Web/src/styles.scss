@@ -502,3 +502,39 @@ app-imports-page, app-review-page, app-positions-page, app-snapshots-page { disp
   color: #27435d;
   font: inherit;
 }
+
+/* Snapshot controls retain their full values at narrow widths. */
+.publication-bar { flex-wrap: wrap; }
+.publish-form { flex-wrap: wrap; gap: 10px; }
+.publish-form input.publication-year { width: 116px; min-width: 116px; flex: 0 0 116px; font-size: 14px; }
+.publish-form select.publication-quarter { width: 96px; min-width: 96px; flex: 0 0 96px; padding-right: 30px; font-size: 14px; }
+.publish-form .replace-check { font-size: 12px; }
+.publish-form .replace-check input { width: 16px; min-height: 16px; height: 16px; padding: 0; flex: none; }
+.snapshot-detail-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.country-detail-button { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.country-detail-button strong { color: #237e6b; }
+.country-detail-button:hover strong { text-decoration: underline; }
+.country-detail-button:focus-visible { outline: 2px solid #2874c9; outline-offset: 5px; border-radius: 3px; }
+.app-dialog { width: min(600px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); margin: auto; padding: 0; border: 1px solid #dce5ed; border-radius: 14px; overflow: hidden; background: white; color: #27435d; box-shadow: 0 24px 80px rgb(14 34 54 / 30%); }
+.app-dialog::backdrop { background: rgb(12 29 47 / 58%); backdrop-filter: blur(2px); }
+.app-dialog.dialog-wide { width: min(1360px, calc(100vw - 48px)); }
+.dialog-card { display: flex; flex-direction: column; max-height: calc(100dvh - 48px); }
+.app-dialog .modal-content { flex: 1; min-height: 0; font-size: 14px; line-height: 1.6; }
+.app-dialog .modal-heading { align-items: center; gap: 16px; }
+.app-dialog .modal-heading h2 { margin: 0; font-size: 20px; }
+.dialog-context { margin: 0 0 16px; color: #718698; font-size: 12px; }
+.app-dialog .contribution-search { margin: 0 0 16px; padding: 0; border: 0; flex-wrap: wrap; }
+.app-dialog .contribution-search input { min-height: 40px; width: 100px; font-size: 14px; }
+.dialog-state { padding: 16px; background: #f4f8fa; border-radius: 8px; color: #657d91; }
+.dialog-technical { margin-top: 18px; font-size: 12px; color: #718698; overflow-wrap: anywhere; }
+.dialog-actions { display: flex; justify-content: flex-end; margin-top: 24px; }
+@media (max-width: 640px) {
+  .app-dialog, .app-dialog.dialog-wide { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); }
+  .dialog-card { max-height: calc(100dvh - 20px); }
+  .snapshot-detail-actions { align-items: flex-start; }
+}
+
+.app-dialog .table-scroll table { min-width: 850px; }
+.app-dialog .table-scroll th { font-size: 11px; white-space: nowrap; }
+.app-dialog .table-scroll td { font-size: 13px; line-height: 1.5; }
+.app-dialog .subcell { max-width: 300px; font-size: 11px; white-space: normal; text-overflow: clip; }

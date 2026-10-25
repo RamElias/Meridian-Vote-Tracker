@@ -1,6 +1,7 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { computed, inject, signal } from '@angular/core';
 
+import { apiErrorMessage } from './api-errors';
 import { ApiService } from '../api.service';
 import { ImportRecord, SnapshotRecord } from '../models';
 
@@ -113,10 +114,6 @@ export abstract class FeatureStore {
   }
 
   protected showError(error: unknown): void {
-    if (typeof error === 'string') {
-      this.error.set(error);
-      return;
-    }
     if (error instanceof HttpErrorResponse) {
       const body = error.error as {
         detail?: string;
@@ -126,14 +123,11 @@ export abstract class FeatureStore {
         votesWithoutPosition?: string[];
       } | null;
       const message = body?.detail ?? body?.title ?? error.message;
-      const reference = body?.correlationId ?? error.headers.get('X-Correlation-ID');
       if (body?.unknownVoteIds?.length || body?.votesWithoutPosition?.length)
         this.fieldErrors.set({
           voteIds: message + ' ' + (body.unknownVoteIds ?? body.votesWithoutPosition)?.join(', '),
         });
-      this.error.set(message + (reference ? ` (Reference: ${reference})` : ''));
-      return;
     }
-    this.error.set('The request could not be completed. Check the API connection and try again.');
+    this.error.set(apiErrorMessage(error));
   }
 }

@@ -1,15 +1,53 @@
-import { Component, inject } from '@angular/core';
+import { Component, effect, inject, OnDestroy, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { ModalComponent } from '../../shared/modal.component';
 import { SnapshotsStore } from './snapshots.store';
 
 @Component({
   selector: 'app-snapshots-page',
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, ModalComponent],
   templateUrl: './snapshots.page.html',
 })
-export class SnapshotsPage {
+export class SnapshotsPage implements OnDestroy {
   private readonly workspace = inject(SnapshotsStore);
+  readonly contributionDialogOpen = signal(false);
+  readonly contributionsLoaded = this.workspace.contributionsLoaded;
+  readonly contributionsError = this.workspace.contributionsError;
+  readonly publicationConflict = this.workspace.publicationConflict;
+  private dialogSnapshotId: string | null = null;
+
+  constructor() {
+    effect(() => {
+      if (
+        this.contributionDialogOpen() &&
+        this.workspace.selectedSnapshot()?.id !== this.dialogSnapshotId
+      )
+        this.closeContributionDialog();
+    });
+  }
+  async openContributionDialog(code?: string): Promise<void> {
+    const snapshot = this.workspace.selectedSnapshot();
+    if (!snapshot || snapshot.status !== 'Completed') return;
+    this.dialogSnapshotId = snapshot.id;
+    const currentCode = this.workspace.countryCode();
+    const suggested = this.workspace
+      .snapshotResults()
+      .some((item) => item.countryCode === currentCode)
+      ? currentCode
+      : (this.workspace.snapshotResults()[0]?.countryCode ?? currentCode);
+    this.workspace.setCountryCode(code ?? suggested);
+    this.contributionDialogOpen.set(true);
+    await this.workspace.loadContributions();
+  }
+  closeContributionDialog(): void {
+    this.contributionDialogOpen.set(false);
+    this.workspace.closeContributions();
+  }
+  ngOnDestroy(): void {
+    this.workspace.closeContributions();
+    this.workspace.publicationConflict.set(null);
+  }
   readonly snapshotsHasMore = this.workspace.snapshotsHasMore;
   readonly loadMoreSnapshots = this.workspace.loadMoreSnapshots.bind(this.workspace);
   readonly historyYear = this.workspace.historyYear;

@@ -1,3 +1,5 @@
+import { HttpErrorResponse } from '@angular/common/http';
+import { apiErrorMessage } from '../../shared/api-errors';
 import { Injectable, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
@@ -36,6 +38,14 @@ export class SnapshotsStore extends FeatureStore {
   readonly countryCode = signal('USA');
 
   readonly contributionsLoading = signal(false);
+  readonly contributionsLoaded = signal(false);
+  readonly contributionsError = signal('');
+  readonly publicationConflict = signal<{
+    year: number;
+    quarter: number;
+    detail: string;
+    reference: string | null;
+  } | null>(null);
 
   private contributionRequest = 0;
 
@@ -90,6 +100,7 @@ export class SnapshotsStore extends FeatureStore {
   private async openSnapshotId(id: string): Promise<void> {
     const request = ++this.snapshotRequest;
     if (this.requestedSnapshotId !== id) {
+      this.publicationConflict.set(null);
       this.resetContributions();
       this.snapshotResults.set([]);
       this.snapshotResultsHasMore.set(false);
@@ -201,6 +212,12 @@ export class SnapshotsStore extends FeatureStore {
     this.contributions.set([]);
     this.contributionsHasMore.set(false);
     this.contributionsLoading.set(false);
+    this.contributionsLoaded.set(false);
+    this.contributionsError.set('');
+  }
+
+  closeContributions(): void {
+    this.resetContributions();
   }
 
   async loadContributions(): Promise<void> {
@@ -222,8 +239,10 @@ export class SnapshotsStore extends FeatureStore {
       });
       return;
     }
+    this.fieldErrors.update(({ countryCode: _, ...rest }) => rest);
     const request = ++this.contributionRequest;
     const after = append ? (this.contributions().at(-1)?.ordinal ?? 0) : 0;
+    this.contributionsError.set('');
     this.contributionsLoading.set(true);
     try {
       const rows = await firstValueFrom(this.api.contributions(snapshot.id, code, after));
@@ -235,8 +254,9 @@ export class SnapshotsStore extends FeatureStore {
         return;
       this.contributions.update((current) => (append ? [...current, ...rows] : rows));
       this.contributionsHasMore.set(rows.length === 100);
+      this.contributionsLoaded.set(true);
     } catch (error) {
-      if (request === this.contributionRequest) this.showError(error);
+      if (request === this.contributionRequest) this.contributionsError.set(apiErrorMessage(error));
     } finally {
       if (request === this.contributionRequest) this.contributionsLoading.set(false);
     }
@@ -254,18 +274,36 @@ export class SnapshotsStore extends FeatureStore {
       this.fieldErrors.set({ publicationYear: 'Enter a year from 1900 to 9999.' });
       return;
     }
+    const year = Number(this.publicationYear());
+    const quarter = Number(this.publicationQuarter());
+    if (!Number.isInteger(quarter) || quarter < 1 || quarter > 4) {
+      this.fieldErrors.set({ publicationQuarter: 'Choose a quarter from Q1 to Q4.' });
+      return;
+    }
+    this.notice.set('');
+    this.publicationConflict.set(null);
     await this.run(async () => {
-      await firstValueFrom(
-        this.api.publishSnapshot(
-          snapshot.id,
-          Number(this.publicationYear()),
-          Number(this.publicationQuarter()),
-          this.replaceActive(),
-        ),
-      );
-      this.notice.set(
-        `Snapshot published for ${this.publicationYear()} Q${this.publicationQuarter()}.`,
-      );
+      try {
+        await firstValueFrom(
+          this.api.publishSnapshot(snapshot.id, year, quarter, this.replaceActive()),
+        );
+      } catch (error) {
+        if (error instanceof HttpErrorResponse && error.status === 409) {
+          const body = error.error as { detail?: string; correlationId?: string } | null;
+          this.publicationConflict.set({
+            year,
+            quarter,
+            detail:
+              body?.detail ??
+              'The publication state changed. Refresh and review the active snapshot.',
+            reference: body?.correlationId ?? error.headers.get('X-Correlation-ID'),
+          });
+          await this.loadSnapshots();
+          return;
+        }
+        throw error;
+      }
+      this.notice.set(`Snapshot published for ${year} Q${quarter}.`);
       await Promise.all([this.loadSnapshots(), this.openSnapshotId(snapshot.id)]);
     });
   }

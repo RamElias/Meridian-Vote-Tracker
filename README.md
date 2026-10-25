@@ -120,7 +120,7 @@ npm.cmd audit
 
 `npm.cmd` works in PowerShell without enabling script execution; other shells can use `npm`. The client check regenerates into a temporary directory and detects drift from the checked-in OpenAPI contract. After an intentional contract change, use `npm.cmd run generate:api` and review the generated changes.
 
-Latest local checks: **20 Angular tests passed**, PostgreSQL quick integration suite passed, client consistency and production build passed, and `npm audit` reported zero known vulnerabilities after the Vite override. Detailed evidence, historical volume measurements, and limits are in [VERIFICATION.md](VERIFICATION.md). Backend checks use executable regression runners (`dotnet run`), not a `dotnet test` framework.
+Latest local checks: **27 Angular tests passed**, PostgreSQL quick integration suite passed, client consistency and production build passed, and `npm audit` reported zero known vulnerabilities after the Vite override. Detailed evidence, historical volume measurements, and limits are in [VERIFICATION.md](VERIFICATION.md). Backend checks use executable regression runners (`dotnet run`), not a `dotnet test` framework.
 
 ## 5. Azure configuration and PDF bonus
 

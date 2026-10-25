@@ -94,3 +94,5 @@ The isolated PostgreSQL suite starts real API and Worker processes and checks im
 ## Snapshot capture boundary
 
 Request-time validation and provisional vote rows support immediate feedback and queued UI counts. They are not the final input freeze. At calculation time, the Worker re-evaluates the stored selection, checks positions, replaces provisional vote/version rows and reads country ballots and membership from one repeatable-read transaction. The capture timestamp, contributions, results and completion are committed together. Interrupted attempts roll back and capture a new consistent view on recovery; completed snapshots never recapture. Progress uses a separate table/connection and remains visible during the transaction.
+
+Snapshot contribution details and publication conflicts use a shared native dialog component. Contribution requests keep the snapshot/country identity guards and are invalidated on dialog close. Errors for detail loading are shown in the dialog; publication 409 responses require an explicit subsequent replacement action. The native modal supplies background isolation, focus trapping and Escape handling.

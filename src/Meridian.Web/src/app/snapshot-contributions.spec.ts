@@ -63,7 +63,7 @@ describe('Snapshot contribution selection', () => {
     api.contributions
       .mockReturnValueOnce(late)
       .mockReturnValueOnce(of([contribution('new-country')]));
-    const previous = state.loadContributions();
+    const previous = fixture.componentInstance.openContributionDialog('AAA');
     state.contributionsHasMore.set(true);
     state.setCountryCode('BBB');
     expect(state.contributions()).toEqual([]);
