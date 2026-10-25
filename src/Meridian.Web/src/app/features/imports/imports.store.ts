@@ -59,22 +59,36 @@ export class ImportsStore extends FeatureStore {
     });
   }
 
+  private reportRequest = 0;
+  private listLoading = false;
+
   async openImport(item: Pick<ImportRecord, 'id'>): Promise<void> {
+    const request = ++this.reportRequest;
+    this.selectedImport.set(null);
+    this.importRows.set([]);
+    this.importRowsHasMore.set(false);
+    this.importRowFilter.set('');
     await this.run(async () => {
-      this.selectedImport.set(await firstValueFrom(this.api.importDetails(item.id)));
-      this.importRowFilter.set('');
+      const details = await firstValueFrom(this.api.importDetails(item.id));
+      if (request !== this.reportRequest) return;
+      this.selectedImport.set(details);
       const rows = await firstValueFrom(this.api.importRows(item.id));
+      if (request !== this.reportRequest || this.selectedImport()?.id !== item.id) return;
       this.importRows.set(rows);
       this.importRowsHasMore.set(rows.length === 100);
     });
   }
 
   async setImportRowFilter(classification: string): Promise<void> {
+    const request = ++this.reportRequest;
     this.importRowFilter.set(classification);
+    this.importRows.set([]);
+    this.importRowsHasMore.set(false);
     const id = this.selectedImport()?.id;
     if (id)
       await this.run(async () => {
         const rows = await firstValueFrom(this.api.importRows(id, classification));
+        if (request !== this.reportRequest || this.selectedImport()?.id !== id) return;
         this.importRows.set(rows);
         this.importRowsHasMore.set(rows.length === 100);
       });
@@ -84,16 +98,26 @@ export class ImportsStore extends FeatureStore {
     const id = this.selectedImport()?.id;
     const lastRow = this.importRows().at(-1)?.rowNumber;
     if (!id || lastRow === undefined) return;
+    const request = ++this.reportRequest;
+    const filter = this.importRowFilter();
     await this.run(async () => {
-      const rows = await firstValueFrom(this.api.importRows(id, this.importRowFilter(), lastRow));
+      const rows = await firstValueFrom(this.api.importRows(id, filter, lastRow));
+      if (
+        request !== this.reportRequest ||
+        this.selectedImport()?.id !== id ||
+        this.importRows().at(-1)?.rowNumber !== lastRow
+      )
+        return;
       this.importRows.update((current) => [...current, ...rows]);
       this.importRowsHasMore.set(rows.length === 100);
     });
   }
 
   closeImportDetails(): void {
+    ++this.reportRequest;
     this.selectedImport.set(null);
     this.importRows.set([]);
+    this.importRowsHasMore.set(false);
     this.importRowFilter.set('');
   }
 
@@ -143,33 +167,39 @@ export class ImportsStore extends FeatureStore {
   }
 
   async loadImports(): Promise<void> {
+    if (this.listLoading) return;
+    this.listLoading = true;
     try {
-      const page = await firstValueFrom(this.api.imports());
-      this.imports.set(page);
-      this.importsHasMore.set(page.length === 100);
+      const limit = 100;
+      const hadTail = this.imports().length > limit;
+      const page = await firstValueFrom(this.api.imports(0, limit));
+      this.imports.set([
+        ...page,
+        ...this.imports().filter((item) => !page.some((fresh) => fresh.id === item.id)),
+      ]);
+      if (!hadTail) this.importsHasMore.set(page.length === limit);
       const selected = this.selectedImport();
+      const request = this.reportRequest;
       if (selected && ['Queued', 'Running'].includes(selected.status)) {
         const details = await firstValueFrom(this.api.importDetails(selected.id));
-        if (this.selectedImport()?.id !== selected.id) return;
+        if (request !== this.reportRequest || this.selectedImport()?.id !== selected.id) return;
         this.selectedImport.set(details);
-        if (details.status === 'Completed') {
-          const rows = await firstValueFrom(
-            this.api.importRows(selected.id, this.importRowFilter()),
-          );
-          if (this.selectedImport()?.id !== selected.id) return;
-          this.importRows.set(rows);
-          this.importRowsHasMore.set(rows.length === 100);
-        }
+        if (details.status === 'Completed') await this.setImportRowFilter(this.importRowFilter());
       }
     } catch (error) {
       this.showError(error);
+    } finally {
+      this.listLoading = false;
     }
   }
 
   async loadMoreImports(): Promise<void> {
     await this.run(async () => {
       const page = await firstValueFrom(this.api.imports(this.imports().length));
-      this.imports.update((current) => [...current, ...page]);
+      this.imports.update((current) => [
+        ...current,
+        ...page.filter((item) => !current.some((existing) => existing.id === item.id)),
+      ]);
       this.importsHasMore.set(page.length === 100);
     });
   }

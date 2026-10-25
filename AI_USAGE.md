@@ -13,7 +13,7 @@ AI was used throughout development, including substantial implementation work. I
 - Ran Angular tests for screen state, PDF review and late asynchronous responses; checked generated-client consistency with OpenAPI.
 - Exercised workflows manually in the UI/API and inspected results from supplied CSV files and real PDF extractions.
 
-The latest local checks passed: PostgreSQL quick integration suite, 12 Angular tests, generated-client consistency and production build. Detailed scale measurements and testing limitations belong in VERIFICATION.md rather than this usage summary. Tests are evidence for the covered scenarios, not proof of correctness for every input.
+The latest local checks passed: PostgreSQL quick integration suite, 20 Angular tests, generated-client consistency and production build. Detailed scale measurements and testing limitations belong in VERIFICATION.md rather than this usage summary. Tests are evidence for the covered scenarios, not proof of correctness for every input.
 
 ## Examples where AI-assisted output was corrected
 
@@ -23,6 +23,8 @@ The latest local checks passed: PostgreSQL quick integration suite, 12 Angular t
 | Initial grouped import SQL relied on incorrect visibility assumptions between data-modifying CTEs. | Executing the workflow against PostgreSQL exposed the issue; SQL was corrected and regression coverage retained. |
 | The PDF parser assumed a fixed table width and interpreted checkbox tokens in otherwise empty rows as country codes. | Stored real Azure responses contained merged member-name columns. Parsing now respects column spans and skips checkbox-only identities; regression fixtures reproduce both cases. |
 | Synthetic PDF tests did not expose all layout problems, and low-confidence empty checkbox cells distorted row confidence. | Real extraction review led to relevant-span confidence calculation and safer reparse of untouched drafts. Ambiguous ballots remain flagged for a human rather than being guessed. |
+
+A further independent code review identified inconsistent snapshot capture times, malformed-CSV handling and import-report response races that earlier passing tests had not covered. Source inspection confirmed the findings. Regression scenarios now exercise queued data changes and interrupted capture, strict CSV errors with partial acceptance, metadata report outcomes, stale UI responses and historical snapshot paging. Backend read contracts were made explicit, Angular strict checks enabled, and long SQL formatted without changing its non-whitespace content.
 
 ## Development AI versus application AI
 

@@ -10,7 +10,18 @@ public sealed class DatabaseBootstrapper(string connectionString, ILogger<Databa
         await using var dataSource = NpgsqlDataSource.Create(connectionString);
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        await using (var reconcile = new NpgsqlCommand("UPDATE background_jobs j SET status='Completed',progress_current=progress_total,completed_at=s.completed_at,error_message=NULL FROM ranking_snapshots s WHERE j.id=s.id AND j.job_type='ranking_snapshot' AND s.status='Completed' AND j.status<>'Completed'", connection, transaction))
+        await using (var reconcile = new NpgsqlCommand("""
+            UPDATE background_jobs j
+            SET status='Completed',
+            progress_current=progress_total,
+            completed_at=s.completed_at,
+            error_message=NULL
+            FROM ranking_snapshots s
+            WHERE j.id=s.id
+            AND j.job_type='ranking_snapshot'
+            AND s.status='Completed'
+            AND j.status<>'Completed'
+            """, connection, transaction))
             await reconcile.ExecuteNonQueryAsync(cancellationToken);
         await using (var resetImports = new NpgsqlCommand("UPDATE imports SET status='Queued',rows_processed=0,rows_total=NULL,report=NULL,completed_at=NULL WHERE id IN (SELECT (payload->>'importId')::uuid FROM background_jobs WHERE status='Running' AND job_type='csv_import')", connection, transaction))
             await resetImports.ExecuteNonQueryAsync(cancellationToken);
@@ -21,7 +32,17 @@ public sealed class DatabaseBootstrapper(string connectionString, ILogger<Databa
         await using (var resetJobs = new NpgsqlCommand("UPDATE background_jobs SET status='Queued',started_at=NULL,completed_at=NULL,error_message=NULL,progress_current=0 WHERE status='Running'", connection, transaction))
         {
             var recovered = await resetJobs.ExecuteNonQueryAsync(cancellationToken);
-            await using (var progress = new NpgsqlCommand("UPDATE job_progress p SET phase=j.status,current_count=CASE WHEN j.status='Completed' THEN COALESCE(p.total_count,p.current_count) ELSE 0 END,updated_at=now() FROM background_jobs j WHERE j.id=p.job_id AND j.status IN ('Queued','Completed')",connection,transaction))
+            await using (var progress = new NpgsqlCommand("""
+            UPDATE job_progress p
+            SET phase=j.status,
+            current_count=CASE WHEN j.status='Completed' THEN COALESCE(p.total_count,
+            p.current_count) ELSE 0 END,
+            updated_at=now()
+            FROM background_jobs j
+            WHERE j.id=p.job_id
+            AND j.status IN ('Queued',
+            'Completed')
+            """,connection,transaction))
                 await progress.ExecuteNonQueryAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             if (recovered > 0) logger.LogWarning("Requeued {JobCount} interrupted background jobs", recovered);

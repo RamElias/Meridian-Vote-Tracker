@@ -12,7 +12,29 @@ namespace Meridian.Infrastructure.Features.PdfImports.Services;
 public sealed class PdfImportService(NpgsqlDataSource source, IImportFileStorage storage, IDocumentAnalysisClient analysis, PdfDraftValidator validator) : IPdfImportService
 {
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private const string Projection = "SELECT e.id,e.file_name,e.status,e.version,u.display_name,e.created_at,e.original_extraction_id,e.draft,e.issues,e.error_message,e.import_id,r.display_name,e.reviewed_at,e.decision_note,p.phase,p.current_count,p.total_count FROM pdf_extractions e JOIN app_users u ON u.user_id=e.uploaded_by_user_id LEFT JOIN app_users r ON r.user_id=e.reviewed_by_user_id LEFT JOIN job_progress p ON p.job_id=e.id";
+    private const string Projection = """
+            SELECT e.id,
+            e.file_name,
+            e.status,
+            e.version,
+            u.display_name,
+            e.created_at,
+            e.original_extraction_id,
+            e.draft,
+            e.issues,
+            e.error_message,
+            e.import_id,
+            r.display_name,
+            e.reviewed_at,
+            e.decision_note,
+            p.phase,
+            p.current_count,
+            p.total_count
+            FROM pdf_extractions e
+            JOIN app_users u ON u.user_id=e.uploaded_by_user_id
+            LEFT JOIN app_users r ON r.user_id=e.reviewed_by_user_id
+            LEFT JOIN job_progress p ON p.job_id=e.id
+            """;
     public async Task<PdfExtraction> CreateAsync(string fileName, Stream input, string actor, string correlationId, CancellationToken ct)
     {
         if (!analysis.IsConfigured)
@@ -139,7 +161,19 @@ public sealed class PdfImportService(NpgsqlDataSource source, IImportFileStorage
             await link.ExecuteNonQueryAsync(ct);
         }
 
-        await using (var update = new NpgsqlCommand("UPDATE pdf_extractions SET draft=@draft,issues=@issues,status=@status,version=version+1,updated_at=now(),reviewed_by_user_id=CASE WHEN @approved THEN @actor ELSE reviewed_by_user_id END,reviewed_at=CASE WHEN @approved THEN now() ELSE reviewed_at END,decision_note=@note,import_id=@import WHERE id=@id", connection, tx))
+        await using (var update = new NpgsqlCommand("""
+            UPDATE pdf_extractions
+            SET draft=@draft,
+            issues=@issues,
+            status=@status,
+            version=version+1,
+            updated_at=now(),
+            reviewed_by_user_id=CASE WHEN @approved THEN @actor ELSE reviewed_by_user_id END,
+            reviewed_at=CASE WHEN @approved THEN now() ELSE reviewed_at END,
+            decision_note=@note,
+            import_id=@import
+            WHERE id=@id
+            """, connection, tx))
         {
             update.Parameters.AddWithValue("id", id);
             update.Parameters.AddWithValue("draft", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(draft, Json));
@@ -197,7 +231,29 @@ public sealed class PdfImportService(NpgsqlDataSource source, IImportFileStorage
             return new(false, NotFound: true);
         if (state.Value.Status != required || state.Value.Version != request.ExpectedVersion)
             return new(false, Stale: true, Error: "This extraction changed. Reload its current state.", Current: await ReadCurrentAsync(id, connection, tx, ct));
-        await using (var update = new NpgsqlCommand("UPDATE pdf_extractions SET status=@status,version=version+1,updated_at=now(),error_message=NULL,operation_url=CASE WHEN @status='Queued' THEN NULL ELSE operation_url END,reviewed_by_user_id=CASE WHEN @status='Rejected' THEN @actor ELSE reviewed_by_user_id END,reviewed_at=CASE WHEN @status='Rejected' THEN now() ELSE reviewed_at END,decision_note=@note WHERE id=@id; UPDATE background_jobs SET status=CASE WHEN @status='Queued' THEN 'Queued' ELSE 'Completed' END,started_at=NULL,completed_at=NULL,error_message=NULL,payload=jsonb_set(payload,'{correlationId}',to_jsonb(@correlation::text)) WHERE id=@id; DELETE FROM job_progress WHERE job_id=@id", connection, tx))
+        await using (var update = new NpgsqlCommand("""
+            UPDATE pdf_extractions
+            SET status=@status,
+            version=version+1,
+            updated_at=now(),
+            error_message=NULL,
+            operation_url=CASE WHEN @status='Queued' THEN NULL ELSE operation_url END,
+            reviewed_by_user_id=CASE WHEN @status='Rejected' THEN @actor ELSE reviewed_by_user_id END,
+            reviewed_at=CASE WHEN @status='Rejected' THEN now() ELSE reviewed_at END,
+            decision_note=@note
+            WHERE id=@id;
+            UPDATE background_jobs
+            SET status=CASE WHEN @status='Queued' THEN 'Queued' ELSE 'Completed' END,
+            started_at=NULL,
+            completed_at=NULL,
+            error_message=NULL,
+            payload=jsonb_set(payload,
+            '{correlationId}',
+            to_jsonb(@correlation::text))
+            WHERE id=@id;
+            DELETE FROM job_progress
+            WHERE job_id=@id
+            """, connection, tx))
         {
             update.Parameters.AddWithValue("id", id);
             update.Parameters.AddWithValue("status", next);

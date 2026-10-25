@@ -162,6 +162,7 @@ try
     Check((await snapshots.PublishAsync(other.SnapshotId.Value,2024,1,true,"lana","regression",default)).Applied,"explicit publication replacement");
     Check((await snapshots.WithdrawAsync(other.SnapshotId.Value,"lana","regression",default)).Applied,"withdrawal retains history");
 
+    await ReviewRegressionChecks.RunAsync(source,imports,worker,votes,snapshots,rankings,bootstrap);
     await PdfImportChecks.RunAsync(source,bootstrap,storage,worker);
     await HttpApiChecks.RunAsync(builder.ConnectionString,source,first,snapId);
     await WorkerHostChecks.RunAsync(builder.ConnectionString,source,storagePath);

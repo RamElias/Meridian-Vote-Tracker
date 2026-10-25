@@ -124,15 +124,70 @@ export class SnapshotsStore extends FeatureStore {
     });
   }
 
+  readonly snapshotsHasMore = signal(false);
+  readonly historyYear = signal<number | null>(null);
+  readonly historyQuarter = signal<number | null>(null);
+  readonly historyPublication = signal('');
+  private historyRequest = 0;
+  private historyLoading = false;
+
+  async applyHistoryFilter(): Promise<void> {
+    ++this.historyRequest;
+    this.snapshots.set([]);
+    this.snapshotsHasMore.set(false);
+    await this.fetchSnapshotHistory(false);
+  }
+
   async loadSnapshots(): Promise<void> {
+    if (this.historyLoading) return;
+    await this.fetchSnapshotHistory(false);
+  }
+
+  async loadMoreSnapshots(): Promise<void> {
+    if (this.historyLoading || !this.snapshotsHasMore()) return;
+    await this.fetchSnapshotHistory(true);
+  }
+
+  private async fetchSnapshotHistory(append: boolean): Promise<void> {
+    const request = ++this.historyRequest;
+    this.historyLoading = true;
     try {
-      const items = await firstValueFrom(this.api.snapshots());
-      this.snapshots.set(items);
+      const offset = append ? this.snapshots().length : 0;
+      const limit = append ? 100 : Math.min(200, Math.max(100, this.snapshots().length));
+      const publication = this.historyPublication();
+      if (
+        publication &&
+        !['Active', 'Withdrawn', 'Superseded', 'Unpublished'].includes(publication)
+      )
+        return;
+      const items = await firstValueFrom(
+        this.api.snapshots(
+          offset,
+          limit,
+          this.historyYear() ?? undefined,
+          this.historyQuarter() ?? undefined,
+          publication
+            ? (publication as 'Active' | 'Withdrawn' | 'Superseded' | 'Unpublished')
+            : undefined,
+        ),
+      );
+      if (request !== this.historyRequest) return;
+      this.snapshots.set(
+        append
+          ? [...this.snapshots(), ...items]
+          : [
+              ...items,
+              ...this.snapshots().filter((old) => !items.some((fresh) => fresh.id === old.id)),
+            ],
+      );
+      this.snapshotsHasMore.set(items.length === limit);
       const selected = this.selectedSnapshot();
       if (selected && ['Queued', 'Running'].includes(selected.status))
         await this.openSnapshotId(selected.id);
     } catch (error) {
-      this.showError(error);
+      if (request === this.historyRequest) this.showError(error);
+    } finally {
+      if (request === this.historyRequest) this.historyLoading = false;
     }
   }
 

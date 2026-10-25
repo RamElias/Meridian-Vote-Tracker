@@ -11,7 +11,7 @@ export interface Snapshot {
   inputsCapturedAt?: string | null;
   progress?: JobProgress | null;
   progressCurrent: number;
-  progressTotal: number;
+  progressTotal: number | null;
   publicationQuarter: number | null;
   publicationYear: number | null;
   publishedAt: string | null;

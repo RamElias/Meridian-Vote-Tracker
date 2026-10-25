@@ -8,7 +8,7 @@ internal static class CsvValueNormalizer
         var changes = new Dictionary<string, object>(StringComparer.Ordinal);
         foreach (var (key, value) in raw)
         {
-            if (value is not string original) continue;
+            if (key.StartsWith("__", StringComparison.Ordinal) || value is not string original) continue;
             var normalized = original.Trim();
             if (key == "session" && int.TryParse(normalized, NumberStyles.None, CultureInfo.InvariantCulture, out var session)) normalized = session.ToString(CultureInfo.InvariantCulture);
             values[key] = normalized;

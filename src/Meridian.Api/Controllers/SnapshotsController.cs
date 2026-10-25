@@ -24,8 +24,14 @@ public sealed class SnapshotsController(ISnapshotService snapshots) : ApiControl
 
     [Authorize]
     [HttpGet("/api/v1/snapshots", Name = "ListSnapshots")]
-    public async Task<IActionResult> ListSnapshots(CancellationToken ct)
-    { return Ok(await snapshots.ListAsync(ct)); }
+    public async Task<IActionResult> ListSnapshots(CancellationToken ct, [FromQuery] int offset = 0, [FromQuery] int limit = 100, [FromQuery] int? year = null, [FromQuery] short? quarter = null, [FromQuery] string? publication = null)
+    {
+        if (publication is not (null or "Active" or "Withdrawn" or "Superseded" or "Unpublished"))
+            return ApiProblem(title: "Invalid publication filter", statusCode: 400);
+        if (quarter is < 1 or > 4 || year is < 1900 or > 9999)
+            return ApiProblem(title: "Invalid publication period", statusCode: 400);
+        return Ok(await snapshots.ListAsync(ct, offset, limit, year, quarter, publication));
+    }
 
     [Authorize]
     [HttpGet("/api/v1/snapshots/{id:guid}", Name = "GetSnapshot")]

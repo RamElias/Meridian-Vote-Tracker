@@ -10,11 +10,21 @@ import { RequestBuilder } from '../../request-builder';
 import { Snapshot } from '../../models/snapshot';
 
 export interface ListSnapshots$Params {
+  offset?: number;
+  limit?: number;
+  year?: number;
+  quarter?: number;
+  publication?: 'Active' | 'Withdrawn' | 'Superseded' | 'Unpublished';
 }
 
 export function listSnapshots(http: HttpClient, rootUrl: string, params?: ListSnapshots$Params, context?: HttpContext): Observable<StrictHttpResponse<Array<Snapshot>>> {
   const rb = new RequestBuilder(rootUrl, listSnapshots.PATH, 'get');
   if (params) {
+    rb.query('offset', params.offset, {});
+    rb.query('limit', params.limit, {});
+    rb.query('year', params.year, {});
+    rb.query('quarter', params.quarter, {});
+    rb.query('publication', params.publication, {});
   }
 
   return http.request(

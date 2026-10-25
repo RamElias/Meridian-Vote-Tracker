@@ -488,3 +488,17 @@ app-imports-page, app-review-page, app-positions-page, app-snapshots-page { disp
 .country-comparison .human-value-list div:first-child strong {font-size:30px;line-height:1.3;}
 .country-comparison .current-value .human-value-list div:first-child strong {color:#309860;}
 .country-comparison .proposal-card .human-value-list div:first-child strong {color:#b98316;}
+
+.history-filters { display:flex; gap:12px; flex-wrap:wrap; align-items:end; padding:16px; }
+.history-filters label { display:grid; gap:5px; font-size:12px; }
+.history-filters input { width:110px; }
+
+.history-filters input, .history-filters select {
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid #d5e1eb;
+  border-radius: 7px;
+  background: white;
+  color: #27435d;
+  font: inherit;
+}

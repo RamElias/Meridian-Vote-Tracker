@@ -58,9 +58,9 @@
                 ><small class="subcell"
                   >{{ item.progress?.phase }}
                   @if (item.progress) {
-                    · {{ item.progress?.current }}
-                    @if (item.progress?.total) {
-                      / {{ item.progress?.total }}
+                    · {{ item.progress.current }}
+                    @if (item.progress.total) {
+                      / {{ item.progress.total }}
                     }
                   }
                 </small>

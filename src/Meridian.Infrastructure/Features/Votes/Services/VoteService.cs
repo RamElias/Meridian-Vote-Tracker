@@ -9,7 +9,7 @@ namespace Meridian.Infrastructure.Features.Votes.Services;
 
 public sealed class VoteService(NpgsqlDataSource dataSource) : IVoteService
 {
-    public async Task<IReadOnlyList<object>> ListAsync(string? search, int? session, DateOnly? fromDate, DateOnly? toDate, int offset, int limit, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<VoteSummaryResponse>> ListAsync(string? search, int? session, DateOnly? fromDate, DateOnly? toDate, int offset, int limit, CancellationToken cancellationToken)
     {
         var filters = new List<string>();
         if (!string.IsNullOrWhiteSpace(search)) filters.Add("v.assembly_vote_id ILIKE @search OR vv.resolution_title ILIKE @search");
@@ -26,32 +26,67 @@ public sealed class VoteService(NpgsqlDataSource dataSource) : IVoteService
         command.Parameters.AddWithValue("limit", Math.Clamp(limit, 1, 500));
         command.Parameters.AddWithValue("offset", Math.Max(0, offset));
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        var result = new List<object>();
+        var result = new List<VoteSummaryResponse>();
         while (await reader.ReadAsync(cancellationToken))
-            result.Add(new { voteId = reader.GetString(0), session = reader.GetInt32(1), voteDate = reader.GetFieldValue<DateOnly>(2), title = reader.GetString(3), stance = reader.IsDBNull(4) ? null : reader.GetString(4), weight = reader.IsDBNull(5) ? (short?)null : reader.GetInt16(5), pendingConflicts = reader.GetInt64(6) });
+            result.Add(new VoteSummaryResponse { VoteId = reader.GetString(0), Session = reader.GetInt32(1), VoteDate = reader.GetFieldValue<DateOnly>(2), Title = reader.GetString(3), Stance = reader.IsDBNull(4) ? null : reader.GetString(4), Weight = reader.IsDBNull(5) ? (short?)null : reader.GetInt16(5), PendingConflicts = reader.GetInt64(6) });
         return result;
     }
 
-    public async Task<object?> GetAsync(string voteId, CancellationToken cancellationToken)
+    public async Task<VoteDetailResponse?> GetAsync(string voteId, CancellationToken cancellationToken)
     {
-        const string sql = "SELECT v.assembly_vote_id,vv.id,vv.session,vv.vote_date,vv.resolution_title,vv.published_at,p.id,p.stance,p.weight,p.actor_user_id,p.note,p.created_at,(SELECT count(*) FROM conflicts c WHERE c.assembly_vote_id=v.assembly_vote_id AND c.status='Pending') FROM votes v JOIN vote_versions vv ON vv.id=v.current_version_id LEFT JOIN vote_positions vp ON vp.assembly_vote_id=v.assembly_vote_id LEFT JOIN position_versions p ON p.id=vp.current_version_id WHERE v.assembly_vote_id=@id";
+        const string sql = """
+            SELECT v.assembly_vote_id,
+            vv.id,
+            vv.session,
+            vv.vote_date,
+            vv.resolution_title,
+            vv.published_at,
+            p.id,
+            p.stance,
+            p.weight,
+            p.actor_user_id,
+            p.note,
+            p.created_at,
+            (
+            SELECT count(*)
+            FROM conflicts c
+            WHERE c.assembly_vote_id=v.assembly_vote_id
+            AND c.status='Pending')
+            FROM votes v
+            JOIN vote_versions vv ON vv.id=v.current_version_id
+            LEFT JOIN vote_positions vp ON vp.assembly_vote_id=v.assembly_vote_id
+            LEFT JOIN position_versions p ON p.id=vp.current_version_id
+            WHERE v.assembly_vote_id=@id
+            """;
         await using var command = dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue("id", voteId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
-        var result = new
-        {
-            voteId = reader.GetString(0), voteVersionId = reader.GetInt64(1), session = reader.GetInt32(2), voteDate = reader.GetFieldValue<DateOnly>(3), title = reader.GetString(4), publishedAt = reader.GetFieldValue<DateTimeOffset>(5),
-            position = reader.IsDBNull(6) ? null : new { versionId = reader.GetInt64(6), stance = reader.GetString(7), weight = reader.GetInt16(8), updatedBy = reader.GetString(9), note = reader.IsDBNull(10) ? null : reader.GetString(10), updatedAt = reader.GetFieldValue<DateTimeOffset>(11) },
-            pendingConflicts = reader.GetInt64(12)
-        };
+        var result = new VoteHeaderResponse { VoteId = reader.GetString(0), VoteVersionId = reader.GetInt64(1), Session = reader.GetInt32(2), VoteDate = reader.GetFieldValue<DateOnly>(3), Title = reader.GetString(4), PublishedAt = reader.GetFieldValue<DateTimeOffset>(5), Position = reader.IsDBNull(6) ? null : new PositionResponse { VersionId = reader.GetInt64(6), Stance = reader.GetString(7), Weight = reader.GetInt16(8), UpdatedBy = reader.GetString(9), Note = reader.IsDBNull(10) ? null : reader.GetString(10), UpdatedAt = reader.GetFieldValue<DateTimeOffset>(11) }, PendingConflicts = reader.GetInt64(12) };
         await reader.CloseAsync();
-        await using var countryVoteCommand = dataSource.CreateCommand("SELECT cv.country_code,ms.country_name,cvv.ballot,cvv.id,cvv.source_import_id,i.file_name,u.display_name,i.created_at FROM country_votes cv JOIN member_states ms ON ms.country_code=cv.country_code JOIN country_vote_versions cvv ON cvv.id=cv.current_version_id JOIN imports i ON i.id=cvv.source_import_id LEFT JOIN app_users u ON u.user_id=i.uploaded_by_user_id WHERE cv.assembly_vote_id=@key ORDER BY ms.country_name,cv.country_code");
+        await using var countryVoteCommand = dataSource.CreateCommand("""
+            SELECT cv.country_code,
+            ms.country_name,
+            cvv.ballot,
+            cvv.id,
+            cvv.source_import_id,
+            i.file_name,
+            u.display_name,
+            i.created_at
+            FROM country_votes cv
+            JOIN member_states ms ON ms.country_code=cv.country_code
+            JOIN country_vote_versions cvv ON cvv.id=cv.current_version_id
+            JOIN imports i ON i.id=cvv.source_import_id
+            LEFT JOIN app_users u ON u.user_id=i.uploaded_by_user_id
+            WHERE cv.assembly_vote_id=@key
+            ORDER BY ms.country_name,
+            cv.country_code
+            """);
         countryVoteCommand.Parameters.AddWithValue("key", voteId);
         await using var countryVoteReader = await countryVoteCommand.ExecuteReaderAsync(cancellationToken);
-        var countryVotes = new List<object>();
+        var countryVotes = new List<CountryBallotResponse>();
         while (await countryVoteReader.ReadAsync(cancellationToken))
-            countryVotes.Add(new { countryCode = countryVoteReader.GetString(0).Trim(), countryName = countryVoteReader.GetString(1), ballot = countryVoteReader.GetString(2), versionId = countryVoteReader.GetInt64(3), sourceImportId = countryVoteReader.GetGuid(4), sourceFileName = countryVoteReader.GetString(5), uploadedBy = countryVoteReader.IsDBNull(6) ? null : countryVoteReader.GetString(6), uploadedAt = countryVoteReader.GetFieldValue<DateTimeOffset>(7) });
+            countryVotes.Add(new CountryBallotResponse { CountryCode = countryVoteReader.GetString(0).Trim(), CountryName = countryVoteReader.GetString(1), Ballot = countryVoteReader.GetString(2), VersionId = countryVoteReader.GetInt64(3), SourceImportId = countryVoteReader.GetGuid(4), SourceFileName = countryVoteReader.GetString(5), UploadedBy = countryVoteReader.IsDBNull(6) ? null : countryVoteReader.GetString(6), UploadedAt = countryVoteReader.GetFieldValue<DateTimeOffset>(7) });
         await countryVoteReader.CloseAsync();
         // Initial versions carry provenance even for imports created before audit events existed.
         // Later versions already have a conflict-decision audit and are not duplicated here.
@@ -87,10 +122,10 @@ public sealed class VoteService(NpgsqlDataSource dataSource) : IVoteService
         await using var history = dataSource.CreateCommand(historySql);
         history.Parameters.AddWithValue("key", voteId);
         await using var historyReader = await history.ExecuteReaderAsync(cancellationToken);
-        var events = new List<object>();
+        var events = new List<VoteHistoryResponse>();
         while (await historyReader.ReadAsync(cancellationToken))
-            events.Add(new { action = historyReader.GetString(0), actor = historyReader.GetString(1), oldValue = historyReader.IsDBNull(2) ? (JsonElement?)null : historyReader.GetFieldValue<JsonDocument>(2).RootElement.Clone(), newValue = historyReader.IsDBNull(3) ? (JsonElement?)null : historyReader.GetFieldValue<JsonDocument>(3).RootElement.Clone(), note = historyReader.IsDBNull(4) ? null : historyReader.GetString(4), correlationId = historyReader.IsDBNull(5) ? null : historyReader.GetString(5), occurredAt = historyReader.GetFieldValue<DateTimeOffset>(6), sourceImportId = historyReader.IsDBNull(7) ? (Guid?)null : historyReader.GetGuid(7), sourceFileName = historyReader.IsDBNull(8) ? null : historyReader.GetString(8), entityKey = historyReader.GetString(9) });
-        return new { vote = result, countryVotes, history = events };
+            events.Add(new VoteHistoryResponse { Action = historyReader.GetString(0), Actor = historyReader.GetString(1), OldValue = historyReader.IsDBNull(2) ? (JsonElement?)null : historyReader.GetFieldValue<JsonDocument>(2).RootElement.Clone(), NewValue = historyReader.IsDBNull(3) ? (JsonElement?)null : historyReader.GetFieldValue<JsonDocument>(3).RootElement.Clone(), Note = historyReader.IsDBNull(4) ? null : historyReader.GetString(4), CorrelationId = historyReader.IsDBNull(5) ? null : historyReader.GetString(5), OccurredAt = historyReader.GetFieldValue<DateTimeOffset>(6), SourceImportId = historyReader.IsDBNull(7) ? (Guid?)null : historyReader.GetGuid(7), SourceFileName = historyReader.IsDBNull(8) ? null : historyReader.GetString(8), EntityKey = historyReader.GetString(9) });
+        return new VoteDetailResponse(result, countryVotes, events);
     }
 
     public async Task<PositionWriteResult> SetPositionAsync(string voteId, PositionUpdateRequest request, string actorUserId, string correlationId, CancellationToken cancellationToken)
@@ -123,7 +158,7 @@ public sealed class VoteService(NpgsqlDataSource dataSource) : IVoteService
             oldWeight = reader.IsDBNull(2) ? null : reader.GetInt16(2);
         }
         if (request.ExpectedVersionId != oldVersionId)
-            return new PositionWriteResult(false, false, "The position changed since you opened it. Review the current value before saving again.", new { versionId = oldVersionId, stance = oldStance, weight = oldWeight }, true);
+            return new PositionWriteResult(false, false, "The position changed since you opened it. Review the current value before saving again.", new PositionStateResponse(oldVersionId, oldStance, oldWeight), true);
         long newVersionId;
         await using (var insert = new NpgsqlCommand("INSERT INTO position_versions(assembly_vote_id,stance,weight,actor_user_id,note) VALUES (@id,@stance,@weight,@actor,@note) RETURNING id", connection, transaction))
         {
@@ -153,7 +188,7 @@ public sealed class VoteService(NpgsqlDataSource dataSource) : IVoteService
             await audit.ExecuteNonQueryAsync(cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);
-        return new PositionWriteResult(true, false, null, new { versionId = newVersionId, voteId, stance, weight = request.Weight, updatedBy = actorUserId });
+        return new PositionWriteResult(true, false, null, new PositionStateResponse(newVersionId, stance, request.Weight, voteId, actorUserId));
     }
 }
 

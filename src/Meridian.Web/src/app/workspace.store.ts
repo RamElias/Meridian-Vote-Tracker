@@ -33,11 +33,15 @@ export class WorkspaceStore implements OnInit, OnDestroy {
   async ngOnInit(): Promise<void> {
     await this.refreshAll();
     this.poller = setInterval(() => {
-      if(this.pdfStore.items().some(i=>['Queued','Running'].includes(i.status))) void this.pdfStore.refresh();
+      if (this.pdfStore.items().some((i) => ['Queued', 'Running'].includes(i.status)))
+        void this.pdfStore.refresh();
       if (this.importsStore.imports().some((item) => ['Queued', 'Running'].includes(item.status)))
         void this.importsStore.loadImports();
       if (
-        this.snapshotsStore.snapshots().some((item) => ['Queued', 'Running'].includes(item.status))
+        this.snapshotsStore
+          .snapshots()
+          .some((item) => ['Queued', 'Running'].includes(item.status)) ||
+        ['Queued', 'Running'].includes(this.snapshotsStore.selectedSnapshot()?.status ?? '')
       )
         void this.snapshotsStore.loadSnapshots();
     }, 2500);
@@ -61,8 +65,10 @@ export class WorkspaceStore implements OnInit, OnDestroy {
   async chooseSection(section: Section): Promise<void> {
     this.section.set(section);
     this.activeStore().error.set('');
-    if (section === 'imports') await Promise.all([this.importsStore.loadImports(),this.pdfStore.refresh()]);
-    if (section === 'review') await Promise.all([this.reviewStore.loadConflicts(),this.pdfStore.refresh()]);
+    if (section === 'imports')
+      await Promise.all([this.importsStore.loadImports(), this.pdfStore.refresh()]);
+    if (section === 'review')
+      await Promise.all([this.reviewStore.loadConflicts(), this.pdfStore.refresh()]);
     if (section === 'positions') await this.positionsStore.loadVotes();
     if (section === 'snapshots') await this.snapshotsStore.loadSnapshots();
   }

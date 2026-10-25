@@ -63,7 +63,7 @@ Start with a fresh application database for the complete sequence. Existing uplo
 2. **Data imports — corrected file.** Upload `assembly_export_2024_q1_rev2.csv`. New records are added; changes to approved values become review items. Uploading identical content again records a duplicate without processing it again.
 3. **Conflict review.** Use **Conflicts**, select an item on the left, and compare values and sources on the right. Accept a proposal or reject it with an optional note. **Resolved** retains the decision. A competing decision receives a conflict response instead of overwriting it.
 4. **Vote positions.** Switch to Lana. Inspect a vote, its country ballots and timeline; assign a Yes/No position and weight from 1 to 5.
-5. **Rankings & snapshots.** Create a snapshot using an explicit vote ID for which you just set a position. Larger selections require positions for every selected vote. Inspect the ranking and a country's contributions, then publish as Lana for an explicit year/quarter.
+5. **Rankings & snapshots.** Create a snapshot using an explicit vote ID for which you just set a position. Larger selections require positions for every selected vote. All inputs are captured consistently when the Worker starts calculation; changes while queued are reflected at that capture point. Inspect the ranking and a country's contributions, then publish as Lana for an explicit year/quarter.
 6. **Verify history.** Change a position or approve a later correction, then reopen the old snapshot: its stored inputs and results remain unchanged. A new snapshot uses the updated data.
 
 For the historical dataset, upload `assembly_historic.csv` and allow the background job to finish. Progress survives page refresh. Vote filters and an explicit ID list are combined as an intersection when both are supplied.
@@ -120,7 +120,7 @@ npm.cmd audit
 
 `npm.cmd` works in PowerShell without enabling script execution; other shells can use `npm`. The client check regenerates into a temporary directory and detects drift from the checked-in OpenAPI contract. After an intentional contract change, use `npm.cmd run generate:api` and review the generated changes.
 
-Latest local checks: **12 Angular tests passed**, PostgreSQL quick integration suite passed, client consistency and production build passed, and `npm audit` reported zero known vulnerabilities after the Vite override. Detailed evidence, historical volume measurements, and limits are in [VERIFICATION.md](VERIFICATION.md). Backend checks use executable regression runners (`dotnet run`), not a `dotnet test` framework.
+Latest local checks: **20 Angular tests passed**, PostgreSQL quick integration suite passed, client consistency and production build passed, and `npm audit` reported zero known vulnerabilities after the Vite override. Detailed evidence, historical volume measurements, and limits are in [VERIFICATION.md](VERIFICATION.md). Backend checks use executable regression runners (`dotnet run`), not a `dotnet test` framework.
 
 ## 5. Azure configuration and PDF bonus
 

@@ -65,6 +65,11 @@ internal static class HttpApiChecks
             await Request(HttpMethod.Get,"/api/v1/vote?voteId=v1","lana",null,200,"VoteDetails");
             await Request(HttpMethod.Get,"/api/v1/conflicts?status=All","lana",null,200,"Conflict",true);
             await Request(HttpMethod.Get,"/api/v1/snapshots","lana",null,200,"Snapshot",true);
+            await Request(HttpMethod.Get,"/api/v1/snapshots?offset=200&limit=20","lana",null,200,"Snapshot",true);
+            var oldPublished = await Request(HttpMethod.Get,"/api/v1/snapshots?year=2030&quarter=2&publication=Active","lana",null,200,"Snapshot",true);
+            if (oldPublished.GetArrayLength()!=1) throw new Exception("Old published snapshot is not discoverable through HTTP filters");
+            await Request(HttpMethod.Get,"/api/v1/snapshots?publication=bad","lana",null,400,"Problem");
+            await Request(HttpMethod.Get,"/api/v1/snapshots?quarter=5","lana",null,400,"Problem");
             await Request(HttpMethod.Get,$"/api/v1/snapshots/{snapshotId}","lana",null,200,"Snapshot");
             await Request(HttpMethod.Get,$"/api/v1/snapshots/{snapshotId}/results","lana",null,200,"SnapshotResult",true);
             await Request(HttpMethod.Get,$"/api/v1/snapshots/{snapshotId}/countries/AAA/contributions","lana",null,200,"VoteContribution",true);

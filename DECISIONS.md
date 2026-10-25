@@ -4,11 +4,11 @@
 
 **One solution, separate API and Worker processes.** HTTP requests enqueue durable PostgreSQL jobs; the Worker performs imports, extraction and calculations. This keeps long work out of requests without introducing a broker. A database ownership lock allows one active Worker; multiple active Workers require leases/fencing. Throttled progress writes use separate short transactions so progress remains visible during processing.
 
-**MVC controllers and feature services with explicit Npgsql SQL.** Grouped SQL fits interleaved imports and large calculations, and keeps transaction boundaries visible. Versioned SQL migrations and constraints enforce invariants. The shared Infrastructure project contains both use-case orchestration and persistence: a deliberate packaging compromise. Separate Application/Domain assemblies and a generic repository would add boundaries that this scope does not yet need. Angular uses a generated OpenAPI client and feature-specific state stores.
+**MVC controllers, typed feature contracts and explicit Npgsql SQL.** Grouped SQL keeps bulk work and transactions visible; migrations/constraints enforce invariants. Infrastructure combines use-case orchestration and persistence to limit project overhead; separate application/domain assemblies can follow when needed. Angular uses a generated OpenAPI client, feature stores and strict compiler/template checks.
 
 ## 2. Approved data, imports and history
 
-Stage the complete CSV before classification because a vote's rows may be scattered throughout the file. Preserve raw and normalized values, normalization changes and row outcomes. Trim surrounding whitespace and canonicalize numeric sessions; ballots and date formats remain strict. Valid rows survive other rows' failures. Promotion, classification, report and completion commit atomically; deferred date decisions refresh affected reports in their transaction.
+Strict CSV parsing reports malformed records without rewriting their content; valid prior records survive an unterminated quoted suffix, whose internal newlines cannot safely identify further records. Stage the complete CSV before classification because a vote's rows may be scattered throughout the file. Preserve raw and normalized values, normalization changes and row outcomes. Trim surrounding whitespace and canonicalize numeric sessions; ballots and date formats remain strict. Valid rows survive other rows' failures. Promotion, classification, report and completion commit atomically; deferred date decisions refresh affected reports in their transaction.
 
 Approved values are **immutable versions with a current pointer**, source attribution and audit. This supports historical explanations without full event sourcing. Database triggers protect versions, audit and completed snapshots. A file hash prevents identical content from being processed twice while preserving upload history. Missing rows never imply deletion.
 
@@ -26,7 +26,7 @@ Only approved data is eligible. All metrics use the snapshot's selected votes an
 | Coverage | Approved ballot count divided by selected votes during membership |
 | Presentation | One decimal place; retain calculation precision |
 
-A selection with missing positions fails explicitly; unknown explicit vote IDs are reported. Snapshots freeze selected votes, exact inputs/version references, rule version, results, denominators and per-country/per-vote contributions. Later changes cannot alter them. Results and completion commit together; recovery reconciles job acknowledgement.
+A selection with missing positions fails explicitly; unknown explicit vote IDs are reported. The request performs preflight validation; selection and every input are frozen together from one repeatable-read view when the Worker begins calculation. Queued data changes can change the selection or cause a clear missing-position/empty-selection failure. Interrupted attempts roll back and recapture on retry. Snapshots preserve exact input/version references, capture time, rule version, results, denominators and per-country/per-vote contributions. Later changes cannot alter them. Results and completion commit together; recovery reconciles job acknowledgement.
 
 An Admin chooses publication year/quarter separately from data range and publication time. At most one snapshot is active per period. Replacement/withdrawal preserves the old snapshot and audit; concurrent publication is serialized and conflicting writes return 409.
 

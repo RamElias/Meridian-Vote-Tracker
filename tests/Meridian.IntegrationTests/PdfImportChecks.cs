@@ -36,6 +36,8 @@ internal static class PdfImportChecks
         {
             PublishedAt = "2024-01-02T00:00:00Z"
         };
+        var minuteOnly = await service.ReviewAsync(item.Id, new(item.Version, draft with { PublishedAt = "2024-01-02T00:00Z" }, null, true), true, "dana", "pdf-test", default);
+        Check(!minuteOnly.Applied && minuteOnly.Issues!.Any(issue => issue.Code == "publishedAt"), "PDF timestamp without seconds is rejected before CSV approval");
         var result = await service.ReviewAsync(item.Id, new(item.Version, draft, null), true, "dana", "pdf-test", default);
         Check(!result.Applied, "PDF approval requires explicit warning acknowledgement");
         var mismatch = await service.ReviewAsync(item.Id, new(item.Version, draft with { PrintedTotals = new(0, 0, 0, 0) }, null, true), true, "dana", "pdf-test", default);

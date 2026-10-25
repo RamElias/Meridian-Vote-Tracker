@@ -47,8 +47,8 @@ public sealed class PdfDraftValidator
             Error("voteDate", "Enter the vote date as yyyy-mm-dd.");
         if (draft.Title.Length is < 1 or > 2000)
             Error("title", "Enter a resolution title (up to 2,000 characters).");
-        if (draft.PublishedAt.Length > 100 || !Regex.IsMatch(draft.PublishedAt, @"T.*(?:Z|[+-]\d{2}:\d{2})$", RegexOptions.None, TimeSpan.FromMilliseconds(100)) || !DateTimeOffset.TryParse(draft.PublishedAt, CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
-            Error("publishedAt", "Enter the source publication timestamp with a time zone. It is not inferred from the upload time.");
+        if (draft.PublishedAt.Length > 100 || !Meridian.Infrastructure.Validation.SourceTimestamp.IsValid(draft.PublishedAt))
+            Error("publishedAt", "Enter the source publication timestamp with seconds and a time zone (yyyy-MM-ddTHH:mm:ssZ). It is not inferred from the upload time.");
         if (draft.Rows.Count is < 1 or > 2000)
             Error("rows", "The draft must contain 1–2,000 country rows.");
         var periods = new Dictionary<string, List<(DateOnly From, DateOnly? To)>>();

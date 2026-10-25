@@ -51,7 +51,7 @@ internal static class WorkerHostChecks
             process.ErrorDataReceived+=(_,e)=>{lock(output) output.AppendLine(e.Data);};
             process.BeginOutputReadLine();process.BeginErrorReadLine();return process;
         }
-        async Task Sql(string sql){await using var command=source.CreateCommand(sql);await command.ExecuteNonQueryAsync();}
+        async Task Sql(string sql){await using var command=source.CreateCommand(sql);command.CommandTimeout=90;await command.ExecuteNonQueryAsync();}
         async Task<long> Count(string sql){await using var command=source.CreateCommand(sql);return Convert.ToInt64(await command.ExecuteScalarAsync());}
         static async Task Wait(Func<Task<bool>> condition,string message){for(var n=0;n<400;n++){if(await condition())return;await Task.Delay(100);}throw new Exception(message);}
     }

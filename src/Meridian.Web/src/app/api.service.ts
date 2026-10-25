@@ -42,24 +42,47 @@ export class ApiService {
   }
 
   importRows(id: string, classification = '', after = 0): Observable<ImportRowDetail[]> {
-    return this.importsApi.listImportRows({ id, limit: 100, after, classification: classification || undefined });
+    return this.importsApi.listImportRows({
+      id,
+      limit: 100,
+      after,
+      classification: classification || undefined,
+    });
   }
 
-  upload(file: File): Observable<{ importId: string; status: string; originalImportId: string | null }> {
-    return this.importsApi.createImport({ body: { file } }).pipe(map(result => ({
-      importId: result.importId,
-      status: result.status,
-      originalImportId: result.originalImportId ?? null,
-    })));
+  upload(
+    file: File,
+  ): Observable<{ importId: string; status: string; originalImportId: string | null }> {
+    return this.importsApi.createImport({ body: { file } }).pipe(
+      map((result) => ({
+        importId: result.importId,
+        status: result.status,
+        originalImportId: result.originalImportId ?? null,
+      })),
+    );
   }
 
   conflicts(voteId = '', status = 'Pending'): Observable<ConflictRecord[]> {
-    if (status !== 'Pending' && status !== 'Resolved' && status !== 'Accepted' && status !== 'Rejected' && status !== 'All') throw new Error('Invalid conflict status');
+    if (
+      status !== 'Pending' &&
+      status !== 'Resolved' &&
+      status !== 'Accepted' &&
+      status !== 'Rejected' &&
+      status !== 'All'
+    )
+      throw new Error('Invalid conflict status');
     return this.conflictsApi.listPendingConflicts({ voteId: voteId.trim() || undefined, status });
   }
 
-  decideConflict(id: string, action: 'Accept' | 'Reject', proposalIndex?: number, note?: string): Observable<{ id: string; status: string }> {
-    return this.conflictsApi.decideConflict({ id, body: { action, proposalIndex, note } }).pipe(map(result => ({ id: result.id, status: result.status })));
+  decideConflict(
+    id: string,
+    action: 'Accept' | 'Reject',
+    proposalIndex?: number,
+    note?: string,
+  ): Observable<{ id: string; status: string }> {
+    return this.conflictsApi
+      .decideConflict({ id, body: { action, proposalIndex, note } })
+      .pipe(map((result) => ({ id: result.id, status: result.status })));
   }
 
   votes(search = '', offset = 0, limit = 100): Observable<VoteSummary[]> {
@@ -70,20 +93,42 @@ export class ApiService {
     return this.votesApi.getVote({ voteId });
   }
 
-  setPosition(voteId: string, stance: 'Y' | 'N', weight: number, note: string, expectedVersionId: number | null): Observable<unknown> {
-    return this.votesApi.setVotePosition({ voteId, body: { stance, weight, note, expectedVersionId } });
+  setPosition(
+    voteId: string,
+    stance: 'Y' | 'N',
+    weight: number,
+    note: string,
+    expectedVersionId: number | null,
+  ): Observable<unknown> {
+    return this.votesApi.setVotePosition({
+      voteId,
+      body: { stance, weight, note, expectedVersionId },
+    });
   }
 
-  snapshots(): Observable<SnapshotRecord[]> {
-    return this.snapshotsApi.listSnapshots();
+  snapshots(
+    offset = 0,
+    limit = 100,
+    year?: number,
+    quarter?: number,
+    publication?: 'Active' | 'Withdrawn' | 'Superseded' | 'Unpublished',
+  ): Observable<SnapshotRecord[]> {
+    return this.snapshotsApi.listSnapshots({ offset, limit, year, quarter, publication });
   }
 
-  createSnapshot(selection: { session?: number; fromDate?: string; toDate?: string; voteIds?: string[] }): Observable<{ id: string; status: string; selectedVoteCount: number }> {
-    return this.snapshotsApi.createSnapshot({ body: selection }).pipe(map(result => ({
-      id: result.id,
-      status: result.status,
-      selectedVoteCount: result.selectedVoteCount,
-    })));
+  createSnapshot(selection: {
+    session?: number;
+    fromDate?: string;
+    toDate?: string;
+    voteIds?: string[];
+  }): Observable<{ id: string; status: string; selectedVoteCount: number }> {
+    return this.snapshotsApi.createSnapshot({ body: selection }).pipe(
+      map((result) => ({
+        id: result.id,
+        status: result.status,
+        selectedVoteCount: result.selectedVoteCount,
+      })),
+    );
   }
 
   snapshot(id: string): Observable<SnapshotRecord> {
@@ -98,7 +143,12 @@ export class ApiService {
     return this.snapshotsApi.listSnapshotContributions({ id, countryCode, after, limit: 100 });
   }
 
-  publishSnapshot(id: string, year: number, quarter: number, replaceActive: boolean): Observable<unknown> {
+  publishSnapshot(
+    id: string,
+    year: number,
+    quarter: number,
+    replaceActive: boolean,
+  ): Observable<unknown> {
     return this.snapshotsApi.publishSnapshot({ id, body: { year, quarter, replaceActive } });
   }
 
@@ -106,13 +156,31 @@ export class ApiService {
     return this.snapshotsApi.withdrawSnapshot({ id });
   }
 
-  pdfImports(offset=0): Observable<PdfExtraction[]> { return this.pdfApi.listPdfImports({offset,limit:50}); }
-  pdfImport(id:string): Observable<PdfExtraction> { return this.pdfApi.getPdfImport({id}); }
-  uploadPdf(file:File): Observable<PdfExtraction> { return this.pdfApi.createPdfImport({body:{file}}); }
-  pdfSource(id:string): Observable<Blob> { return this.pdfApi.getPdfSource({id}); }
-  savePdf(id:string,body:PdfReviewRequest): Observable<PdfExtraction> { return this.pdfApi.savePdfDraft({id,body}); }
-  approvePdf(id:string,body:PdfReviewRequest): Observable<PdfExtraction> { return this.pdfApi.approvePdfDraft({id,body}); }
-  rejectPdf(id:string,expectedVersion:number,note:string): Observable<PdfExtraction> { return this.pdfApi.rejectPdfDraft({id,body:{expectedVersion,note}}); }
-  retryPdf(id:string,expectedVersion:number): Observable<PdfExtraction> { return this.pdfApi.retryPdfImport({id,body:{expectedVersion}}); }
-  reparsePdf(id:string,expectedVersion:number):Observable<PdfExtraction> {return this.pdfApi.reparsePdfImport({id,body:{expectedVersion}});}
+  pdfImports(offset = 0): Observable<PdfExtraction[]> {
+    return this.pdfApi.listPdfImports({ offset, limit: 50 });
+  }
+  pdfImport(id: string): Observable<PdfExtraction> {
+    return this.pdfApi.getPdfImport({ id });
+  }
+  uploadPdf(file: File): Observable<PdfExtraction> {
+    return this.pdfApi.createPdfImport({ body: { file } });
+  }
+  pdfSource(id: string): Observable<Blob> {
+    return this.pdfApi.getPdfSource({ id });
+  }
+  savePdf(id: string, body: PdfReviewRequest): Observable<PdfExtraction> {
+    return this.pdfApi.savePdfDraft({ id, body });
+  }
+  approvePdf(id: string, body: PdfReviewRequest): Observable<PdfExtraction> {
+    return this.pdfApi.approvePdfDraft({ id, body });
+  }
+  rejectPdf(id: string, expectedVersion: number, note: string): Observable<PdfExtraction> {
+    return this.pdfApi.rejectPdfDraft({ id, body: { expectedVersion, note } });
+  }
+  retryPdf(id: string, expectedVersion: number): Observable<PdfExtraction> {
+    return this.pdfApi.retryPdfImport({ id, body: { expectedVersion } });
+  }
+  reparsePdf(id: string, expectedVersion: number): Observable<PdfExtraction> {
+    return this.pdfApi.reparsePdfImport({ id, body: { expectedVersion } });
+  }
 }

@@ -21,7 +21,21 @@ public sealed class PdfExtractionJobProcessor(NpgsqlDataSource source, IImportFi
         await using (var connection = await source.OpenConnectionAsync(stoppingToken))
         await using (var tx = await connection.BeginTransactionAsync(stoppingToken))
         {
-            await using (var claim = new NpgsqlCommand("SELECT j.id,e.file_path,COALESCE(j.payload->>'correlationId',j.id::text),e.operation_url FROM background_jobs j JOIN pdf_extractions e ON e.id=j.id WHERE j.job_type='pdf_extraction' AND j.status='Queued' AND e.status='Queued' ORDER BY j.created_at FOR UPDATE OF j,e SKIP LOCKED LIMIT 1", connection, tx))
+            await using (var claim = new NpgsqlCommand("""
+            SELECT j.id,
+            e.file_path,
+            COALESCE(j.payload->>'correlationId',
+            j.id::text),
+            e.operation_url
+            FROM background_jobs j
+            JOIN pdf_extractions e ON e.id=j.id
+            WHERE j.job_type='pdf_extraction'
+            AND j.status='Queued'
+            AND e.status='Queued'
+            ORDER BY j.created_at FOR
+            UPDATE OF j,
+            e SKIP LOCKED LIMIT 1
+            """, connection, tx))
             await using (var reader = await claim.ExecuteReaderAsync(stoppingToken))
             {
                 if (!await reader.ReadAsync(stoppingToken))
@@ -83,7 +97,22 @@ public sealed class PdfExtractionJobProcessor(NpgsqlDataSource source, IImportFi
             await using var connection = await source.OpenConnectionAsync(ct);
             await using var tx = await connection.BeginTransactionAsync(ct);
             var issues = await validator.ValidateAsync(draft, connection, tx, ct);
-            await using (var complete = new NpgsqlCommand("UPDATE pdf_extractions SET status='AwaitingReview',draft=@draft,extracted_draft=@draft,issues=@issues,version=version+1,updated_at=now(),error_message=NULL WHERE id=@id; UPDATE background_jobs SET status='Completed',completed_at=now(),error_message=NULL WHERE id=@id", connection, tx))
+            await using (var complete = new NpgsqlCommand("""
+            UPDATE pdf_extractions
+            SET status='AwaitingReview',
+            draft=@draft,
+            extracted_draft=@draft,
+            issues=@issues,
+            version=version+1,
+            updated_at=now(),
+            error_message=NULL
+            WHERE id=@id;
+            UPDATE background_jobs
+            SET status='Completed',
+            completed_at=now(),
+            error_message=NULL
+            WHERE id=@id
+            """, connection, tx))
             {
                 complete.Parameters.AddWithValue("id", id);
                 complete.Parameters.AddWithValue("draft", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(draft, PdfImportService.Json));
@@ -102,7 +131,21 @@ public sealed class PdfExtractionJobProcessor(NpgsqlDataSource source, IImportFi
         catch (Exception exception)
         {
             logger.LogError(exception, "PDF extraction {ExtractionId} failed", id);
-            await using var failed = source.CreateCommand("UPDATE pdf_extractions SET status='Failed',error_message=@error,version=version+1,updated_at=now() WHERE id=@id AND status='Running'; UPDATE background_jobs SET status='Failed',error_message=@error,completed_at=now() WHERE id=@id AND status='Running'");
+            await using var failed = source.CreateCommand("""
+            UPDATE pdf_extractions
+            SET status='Failed',
+            error_message=@error,
+            version=version+1,
+            updated_at=now()
+            WHERE id=@id
+            AND status='Running';
+            UPDATE background_jobs
+            SET status='Failed',
+            error_message=@error,
+            completed_at=now()
+            WHERE id=@id
+            AND status='Running'
+            """);
             var message = exception is OperationCanceledException ? "PDF extraction timed out. Retry when the document service is available." : exception is InvalidDataException ? exception.Message : "PDF extraction failed. Check the scan or service configuration and retry.";
             failed.Parameters.AddWithValue("id", id);
             failed.Parameters.AddWithValue("error", message + " Reference: " + correlation);

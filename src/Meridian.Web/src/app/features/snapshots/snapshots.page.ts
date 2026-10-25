@@ -10,6 +10,12 @@ import { SnapshotsStore } from './snapshots.store';
 })
 export class SnapshotsPage {
   private readonly workspace = inject(SnapshotsStore);
+  readonly snapshotsHasMore = this.workspace.snapshotsHasMore;
+  readonly loadMoreSnapshots = this.workspace.loadMoreSnapshots.bind(this.workspace);
+  readonly historyYear = this.workspace.historyYear;
+  readonly historyQuarter = this.workspace.historyQuarter;
+  readonly historyPublication = this.workspace.historyPublication;
+  readonly applyHistoryFilter = this.workspace.applyHistoryFilter.bind(this.workspace);
   readonly ballotLabel = this.workspace.ballotLabel.bind(this.workspace);
   readonly busy = this.workspace.busy;
   readonly contributions = this.workspace.contributions;

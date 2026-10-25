@@ -110,17 +110,17 @@ public sealed class CsvImportJobProcessor(NpgsqlDataSource dataSource, CsvImport
         using var reader = new StreamReader(file, detectEncodingFromByteOrderMarks: true);
         await using var rows = CsvRecordReader.ReadAsync(reader, cancellationToken).GetAsyncEnumerator(cancellationToken);
         if (!await rows.MoveNextAsync()) throw new InvalidDataException("The CSV file is empty.");
+        if (rows.Current.Error is not null) throw new InvalidDataException("The CSV header is malformed: " + rows.Current.Error);
         var headers = rows.Current.Select(header => header.Trim().TrimStart('\uFEFF').ToLowerInvariant()).ToArray();
         if (headers.Length != RequiredHeaders.Length || headers.Distinct(StringComparer.OrdinalIgnoreCase).Count() != headers.Length || RequiredHeaders.Except(headers, StringComparer.OrdinalIgnoreCase).Any())
             throw new InvalidDataException("The CSV header must contain each required assignment column exactly once.");
-        var batch = new List<string[]>(2000);
+        var batch = new List<CsvRecord>(2000);
         long rowNumber = 1;
         long staged = 0;
         while (await rows.MoveNextAsync())
         {
             rowNumber++;
-            var values = rows.Current.ToArray();
-            batch.Add(values);
+            batch.Add(rows.Current);
             if (batch.Count >= 2000)
             {
                 await SaveBatchAsync(jobId, importId, headers, rowNumber - batch.Count + 1, staged + batch.Count, batch, cancellationToken);
@@ -167,7 +167,7 @@ public sealed class CsvImportJobProcessor(NpgsqlDataSource dataSource, CsvImport
         }
         await transaction.CommitAsync(cancellationToken);
     }
-    private async Task SaveBatchAsync(Guid jobId, Guid importId, string[] headers, long firstRow, long progressCurrent, List<string[]> batch, CancellationToken cancellationToken)
+    private async Task SaveBatchAsync(Guid jobId, Guid importId, string[] headers, long firstRow, long progressCurrent, List<CsvRecord> batch, CancellationToken cancellationToken)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -178,9 +178,14 @@ public sealed class CsvImportJobProcessor(NpgsqlDataSource dataSource, CsvImport
                 var values = batch[offset];
                 var raw = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
                 for (var column = 0; column < headers.Length; column++)
-                    raw[headers[column]] = column < values.Length ? values[column] : null;
-                raw["__field_count_valid"] = values.Length == headers.Length;
-                if (values.Length > headers.Length) raw["__extra_columns"] = values.Skip(headers.Length).ToArray();
+                    raw[headers[column]] = column < values.Count ? values[column] : null;
+                if (values.Error is not null)
+                {
+                    raw["__csv_error"] = values.Error;
+                    raw["__source_record"] = values.Source;
+                }
+                raw["__field_count_valid"] = values.Count == headers.Length;
+                if (values.Count > headers.Length) raw["__extra_columns"] = values.Skip(headers.Length).ToArray();
                 await importer.StartRowAsync(cancellationToken);
                 await importer.WriteAsync(importId, NpgsqlDbType.Uuid, cancellationToken);
                 await importer.WriteAsync(firstRow + offset, NpgsqlDbType.Bigint, cancellationToken);

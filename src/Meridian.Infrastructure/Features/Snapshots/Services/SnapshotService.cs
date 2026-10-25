@@ -86,6 +86,8 @@ public sealed class SnapshotService(NpgsqlDataSource dataSource) : ISnapshotServ
             total.Parameters.AddWithValue("id", snapshotId);
             await total.ExecuteNonQueryAsync(cancellationToken);
         }
+        // Provisional rows support the queued UI only. The Worker replaces them and
+        // captures every input from a single repeatable-read view at calculation time.
         await using (var importer = await connection.BeginBinaryImportAsync("COPY ranking_snapshot_votes(snapshot_id,ordinal,assembly_vote_id,vote_version_id,position_version_id,vote_date,session,resolution_title,stance,weight) FROM STDIN (FORMAT BINARY)", cancellationToken))
         {
             for (var i = 0; i < selected.Count; i++)
@@ -109,54 +111,190 @@ public sealed class SnapshotService(NpgsqlDataSource dataSource) : ISnapshotServ
         return new SnapshotCreateResult(true, snapshotId, null, null, selected.Count);
     }
 
-    public async Task<IReadOnlyList<object>> ListAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<SnapshotSummaryResponse>> ListAsync(CancellationToken cancellationToken, int offset = 0, int limit = 100, int? year = null, short? quarter = null, string? publication = null)
     {
-        const string sql = "SELECT s.id,s.status,s.calculation_rule_version,s.created_by_user_id,s.created_at,s.completed_at,s.publication_year,s.publication_quarter,s.published_at,s.withdrawn_at,s.superseded_at,j.progress_current,j.progress_total,(SELECT count(*) FROM ranking_snapshot_votes v WHERE v.snapshot_id=s.id),(SELECT jsonb_build_object('phase',p.phase,'current',p.current_count,'total',p.total_count,'unit',p.unit,'updatedAt',p.updated_at) FROM job_progress p WHERE p.job_id=s.id) AS progress FROM ranking_snapshots s JOIN background_jobs j ON j.id=s.id ORDER BY s.created_at DESC LIMIT 200";
+        const string sql = """
+            SELECT s.id,
+            s.status,
+            s.calculation_rule_version,
+            s.created_by_user_id,
+            s.created_at,
+            s.completed_at,
+            s.publication_year,
+            s.publication_quarter,
+            s.published_at,
+            s.withdrawn_at,
+            s.superseded_at,
+            j.progress_current,
+            j.progress_total,
+            (
+            SELECT count(*)
+            FROM ranking_snapshot_votes v
+            WHERE v.snapshot_id=s.id),
+            (
+            SELECT jsonb_build_object('phase',
+            p.phase,
+            'current',
+            p.current_count,
+            'total',
+            p.total_count,
+            'unit',
+            p.unit,
+            'updatedAt',
+            p.updated_at)
+            FROM job_progress p
+            WHERE p.job_id=s.id) AS progress
+            FROM ranking_snapshots s
+            JOIN background_jobs j ON j.id=s.id
+            WHERE (@year IS NULL
+            OR s.publication_year=@year)
+            AND (@quarter IS NULL
+            OR s.publication_quarter=@quarter)
+            AND (@publication IS NULL
+            OR (@publication='Active'
+            AND s.published_at IS NOT NULL
+            AND s.withdrawn_at IS NULL
+            AND s.superseded_at IS NULL)
+            OR (@publication='Withdrawn'
+            AND s.withdrawn_at IS NOT NULL)
+            OR (@publication='Superseded'
+            AND s.superseded_at IS NOT NULL)
+            OR (@publication='Unpublished'
+            AND s.published_at IS NULL))
+            ORDER BY s.created_at DESC,
+            s.id DESC OFFSET @offset LIMIT @limit
+            """;
         await using var command = dataSource.CreateCommand(sql);
+        command.Parameters.AddWithValue("offset", Math.Max(0, offset));
+        command.Parameters.AddWithValue("limit", Math.Clamp(limit, 1, 200));
+        command.Parameters.Add("year", NpgsqlDbType.Integer).Value = (object?)year ?? DBNull.Value;
+        command.Parameters.Add("quarter", NpgsqlDbType.Smallint).Value = (object?)quarter ?? DBNull.Value;
+        command.Parameters.Add("publication", NpgsqlDbType.Text).Value = (object?)publication ?? DBNull.Value;
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        var items = new List<object>();
+        var items = new List<SnapshotSummaryResponse>();
         while (await reader.ReadAsync(cancellationToken))
-            items.Add(new { id = reader.GetGuid(0), status = reader.GetString(1), ruleVersion = reader.GetString(2), createdBy = reader.GetString(3), createdAt = reader.GetFieldValue<DateTimeOffset>(4), completedAt = reader.IsDBNull(5) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(5), publicationYear = reader.IsDBNull(6) ? (int?)null : reader.GetInt32(6), publicationQuarter = reader.IsDBNull(7) ? (short?)null : reader.GetInt16(7), publishedAt = reader.IsDBNull(8) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(8), withdrawnAt = reader.IsDBNull(9) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(9), supersededAt = reader.IsDBNull(10) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(10), progressCurrent = reader.GetInt64(11), progressTotal = reader.IsDBNull(12) ? (long?)null : reader.GetInt64(12), selectedVoteCount = reader.GetInt64(13), error = (string?)null, progress = reader.IsDBNull(14) ? (JsonElement?)null : reader.GetFieldValue<JsonDocument>(14).RootElement.Clone() });
+            items.Add(new SnapshotSummaryResponse { Id = reader.GetGuid(0), Status = reader.GetString(1), RuleVersion = reader.GetString(2), CreatedBy = reader.GetString(3), CreatedAt = reader.GetFieldValue<DateTimeOffset>(4), CompletedAt = reader.IsDBNull(5) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(5), PublicationYear = reader.IsDBNull(6) ? (int?)null : reader.GetInt32(6), PublicationQuarter = reader.IsDBNull(7) ? (short?)null : reader.GetInt16(7), PublishedAt = reader.IsDBNull(8) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(8), WithdrawnAt = reader.IsDBNull(9) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(9), SupersededAt = reader.IsDBNull(10) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(10), ProgressCurrent = reader.GetInt64(11), ProgressTotal = reader.IsDBNull(12) ? (long?)null : reader.GetInt64(12), SelectedVoteCount = reader.GetInt64(13), Error = (string?)null, Progress = reader.IsDBNull(14) ? (JsonElement?)null : reader.GetFieldValue<JsonDocument>(14).RootElement.Clone() });
         return items;
     }
 
-    public async Task<object?> GetAsync(Guid id, CancellationToken cancellationToken)
+    public async Task<SnapshotDetailResponse?> GetAsync(Guid id, CancellationToken cancellationToken)
     {
-        const string sql = "SELECT s.id,s.status,s.selection,s.calculation_rule_version,s.created_by_user_id,s.created_at,s.inputs_captured_at,s.completed_at,s.error_message,s.publication_year,s.publication_quarter,s.published_at,s.published_by_user_id,s.withdrawn_at,s.withdrawn_by_user_id,s.superseded_at,s.superseded_by,j.progress_current,j.progress_total,(SELECT count(*) FROM ranking_snapshot_votes v WHERE v.snapshot_id=s.id),(SELECT jsonb_build_object('phase',p.phase,'current',p.current_count,'total',p.total_count,'unit',p.unit,'updatedAt',p.updated_at) FROM job_progress p WHERE p.job_id=s.id) AS progress FROM ranking_snapshots s JOIN background_jobs j ON j.id=s.id WHERE s.id=@id";
+        const string sql = """
+            SELECT s.id,
+            s.status,
+            s.selection,
+            s.calculation_rule_version,
+            s.created_by_user_id,
+            s.created_at,
+            s.inputs_captured_at,
+            s.completed_at,
+            s.error_message,
+            s.publication_year,
+            s.publication_quarter,
+            s.published_at,
+            s.published_by_user_id,
+            s.withdrawn_at,
+            s.withdrawn_by_user_id,
+            s.superseded_at,
+            s.superseded_by,
+            j.progress_current,
+            j.progress_total,
+            (
+            SELECT count(*)
+            FROM ranking_snapshot_votes v
+            WHERE v.snapshot_id=s.id),
+            (
+            SELECT jsonb_build_object('phase',
+            p.phase,
+            'current',
+            p.current_count,
+            'total',
+            p.total_count,
+            'unit',
+            p.unit,
+            'updatedAt',
+            p.updated_at)
+            FROM job_progress p
+            WHERE p.job_id=s.id) AS progress
+            FROM ranking_snapshots s
+            JOIN background_jobs j ON j.id=s.id
+            WHERE s.id=@id
+            """;
         await using var command = dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue("id", id);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
         using var selection = reader.GetFieldValue<JsonDocument>(2);
-        return new { id = reader.GetGuid(0), status = reader.GetString(1), selection = selection.RootElement.Clone(), ruleVersion = reader.GetString(3), createdBy = reader.GetString(4), createdAt = reader.GetFieldValue<DateTimeOffset>(5), inputsCapturedAt = reader.IsDBNull(6) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(6), completedAt = reader.IsDBNull(7) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(7), error = reader.IsDBNull(8) ? null : reader.GetString(8), publicationYear = reader.IsDBNull(9) ? (int?)null : reader.GetInt32(9), publicationQuarter = reader.IsDBNull(10) ? (short?)null : reader.GetInt16(10), publishedAt = reader.IsDBNull(11) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(11), publishedBy = reader.IsDBNull(12) ? null : reader.GetString(12), withdrawnAt = reader.IsDBNull(13) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(13), withdrawnBy = reader.IsDBNull(14) ? null : reader.GetString(14), supersededAt = reader.IsDBNull(15) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(15), supersededBy = reader.IsDBNull(16) ? (Guid?)null : reader.GetGuid(16), progressCurrent = reader.GetInt64(17), progressTotal = reader.IsDBNull(18) ? (long?)null : reader.GetInt64(18), selectedVoteCount = reader.GetInt64(19), progress = reader.IsDBNull(20) ? (JsonElement?)null : reader.GetFieldValue<JsonDocument>(20).RootElement.Clone() };
+        return new SnapshotDetailResponse { Id = reader.GetGuid(0), Status = reader.GetString(1), Selection = selection.RootElement.Clone(), RuleVersion = reader.GetString(3), CreatedBy = reader.GetString(4), CreatedAt = reader.GetFieldValue<DateTimeOffset>(5), InputsCapturedAt = reader.IsDBNull(6) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(6), CompletedAt = reader.IsDBNull(7) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(7), Error = reader.IsDBNull(8) ? null : reader.GetString(8), PublicationYear = reader.IsDBNull(9) ? (int?)null : reader.GetInt32(9), PublicationQuarter = reader.IsDBNull(10) ? (short?)null : reader.GetInt16(10), PublishedAt = reader.IsDBNull(11) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(11), PublishedBy = reader.IsDBNull(12) ? null : reader.GetString(12), WithdrawnAt = reader.IsDBNull(13) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(13), WithdrawnBy = reader.IsDBNull(14) ? null : reader.GetString(14), SupersededAt = reader.IsDBNull(15) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(15), SupersededBy = reader.IsDBNull(16) ? (Guid?)null : reader.GetGuid(16), ProgressCurrent = reader.GetInt64(17), ProgressTotal = reader.IsDBNull(18) ? (long?)null : reader.GetInt64(18), SelectedVoteCount = reader.GetInt64(19), Progress = reader.IsDBNull(20) ? (JsonElement?)null : reader.GetFieldValue<JsonDocument>(20).RootElement.Clone() };
     }
 
-    public async Task<IReadOnlyList<object>> ListResultsAsync(Guid id, int offset, int limit, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<SnapshotResultResponse>> ListResultsAsync(Guid id, int offset, int limit, CancellationToken cancellationToken)
     {
-        const string sql = "SELECT country_code,country_name,rank,alignment_score,alignment_numerator,alignment_denominator,participation_percent,participating_ballots,approved_ballots,coverage_percent,approved_member_records,eligible_member_votes FROM ranking_snapshot_results WHERE snapshot_id=@id ORDER BY rank NULLS LAST,country_code OFFSET @offset LIMIT @limit";
+        const string sql = """
+            SELECT country_code,
+            country_name,
+            rank,
+            alignment_score,
+            alignment_numerator,
+            alignment_denominator,
+            participation_percent,
+            participating_ballots,
+            approved_ballots,
+            coverage_percent,
+            approved_member_records,
+            eligible_member_votes
+            FROM ranking_snapshot_results
+            WHERE snapshot_id=@id
+            ORDER BY rank NULLS LAST,
+            country_code OFFSET @offset LIMIT @limit
+            """;
         await using var command = dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue("id", id);
         command.Parameters.AddWithValue("offset", Math.Max(0, offset));
         command.Parameters.AddWithValue("limit", Math.Clamp(limit, 1, 500));
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        var items = new List<object>();
+        var items = new List<SnapshotResultResponse>();
         while (await reader.ReadAsync(cancellationToken))
-            items.Add(new { countryCode = reader.GetString(0).Trim(), countryName = reader.GetString(1), rank = reader.IsDBNull(2) ? (int?)null : reader.GetInt32(2), alignmentScore = reader.IsDBNull(3) ? (decimal?)null : reader.GetDecimal(3), alignmentNumerator = reader.GetDecimal(4), alignmentDenominator = reader.GetDecimal(5), participationPercent = reader.IsDBNull(6) ? (decimal?)null : reader.GetDecimal(6), participatingBallots = reader.GetInt32(7), approvedBallots = reader.GetInt32(8), coveragePercent = reader.IsDBNull(9) ? (decimal?)null : reader.GetDecimal(9), approvedMemberRecords = reader.GetInt32(10), eligibleMemberVotes = reader.GetInt32(11) });
+            items.Add(new SnapshotResultResponse { CountryCode = reader.GetString(0).Trim(), CountryName = reader.GetString(1), Rank = reader.IsDBNull(2) ? (int?)null : reader.GetInt32(2), AlignmentScore = reader.IsDBNull(3) ? (decimal?)null : reader.GetDecimal(3), AlignmentNumerator = reader.GetDecimal(4), AlignmentDenominator = reader.GetDecimal(5), ParticipationPercent = reader.IsDBNull(6) ? (decimal?)null : reader.GetDecimal(6), ParticipatingBallots = reader.GetInt32(7), ApprovedBallots = reader.GetInt32(8), CoveragePercent = reader.IsDBNull(9) ? (decimal?)null : reader.GetDecimal(9), ApprovedMemberRecords = reader.GetInt32(10), EligibleMemberVotes = reader.GetInt32(11) });
         return items;
     }
 
-    public async Task<IReadOnlyList<object>> ListContributionsAsync(Guid id, string countryCode, int afterOrdinal, int limit, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<SnapshotContributionResponse>> ListContributionsAsync(Guid id, string countryCode, int afterOrdinal, int limit, CancellationToken cancellationToken)
     {
-        const string sql = "SELECT sv.ordinal,sv.assembly_vote_id,sv.session,sv.vote_date,sv.resolution_title,sv.stance,sv.weight,c.member_at_vote,c.ballot,c.alignment_numerator,c.alignment_denominator,c.participation_numerator,c.participation_denominator,c.coverage_numerator,c.coverage_denominator,c.country_vote_version_id FROM ranking_snapshot_contributions c JOIN ranking_snapshot_votes sv ON sv.snapshot_id=c.snapshot_id AND sv.assembly_vote_id=c.assembly_vote_id WHERE c.snapshot_id=@id AND c.country_code=@country AND sv.ordinal>@after ORDER BY sv.ordinal LIMIT @limit";
+        const string sql = """
+            SELECT sv.ordinal,
+            sv.assembly_vote_id,
+            sv.session,
+            sv.vote_date,
+            sv.resolution_title,
+            sv.stance,
+            sv.weight,
+            c.member_at_vote,
+            c.ballot,
+            c.alignment_numerator,
+            c.alignment_denominator,
+            c.participation_numerator,
+            c.participation_denominator,
+            c.coverage_numerator,
+            c.coverage_denominator,
+            c.country_vote_version_id
+            FROM ranking_snapshot_contributions c
+            JOIN ranking_snapshot_votes sv ON sv.snapshot_id=c.snapshot_id
+            AND sv.assembly_vote_id=c.assembly_vote_id
+            WHERE c.snapshot_id=@id
+            AND c.country_code=@country
+            AND sv.ordinal>@after
+            ORDER BY sv.ordinal LIMIT @limit
+            """;
         await using var command = dataSource.CreateCommand(sql);
         command.Parameters.AddWithValue("id", id);
         command.Parameters.AddWithValue("country", countryCode.Trim().ToUpperInvariant());
         command.Parameters.AddWithValue("after", Math.Max(0, afterOrdinal));
         command.Parameters.AddWithValue("limit", Math.Clamp(limit, 1, 500));
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        var items = new List<object>();
+        var items = new List<SnapshotContributionResponse>();
         while (await reader.ReadAsync(cancellationToken))
-            items.Add(new { ordinal = reader.GetInt32(0), voteId = reader.GetString(1), session = reader.GetInt32(2), voteDate = reader.GetFieldValue<DateOnly>(3), title = reader.GetString(4), instituteStance = reader.GetString(5), weight = reader.GetInt16(6), memberAtVote = reader.GetBoolean(7), ballot = reader.IsDBNull(8) ? null : reader.GetString(8), alignmentNumerator = reader.GetDecimal(9), alignmentDenominator = reader.GetDecimal(10), participationNumerator = reader.GetInt32(11), participationDenominator = reader.GetInt32(12), coverageNumerator = reader.GetInt32(13), coverageDenominator = reader.GetInt32(14), countryVoteVersionId = reader.IsDBNull(15) ? (long?)null : reader.GetInt64(15) });
+            items.Add(new SnapshotContributionResponse { Ordinal = reader.GetInt32(0), VoteId = reader.GetString(1), Session = reader.GetInt32(2), VoteDate = reader.GetFieldValue<DateOnly>(3), Title = reader.GetString(4), InstituteStance = reader.GetString(5), Weight = reader.GetInt16(6), MemberAtVote = reader.GetBoolean(7), Ballot = reader.IsDBNull(8) ? null : reader.GetString(8), AlignmentNumerator = reader.GetDecimal(9), AlignmentDenominator = reader.GetDecimal(10), ParticipationNumerator = reader.GetInt32(11), ParticipationDenominator = reader.GetInt32(12), CoverageNumerator = reader.GetInt32(13), CoverageDenominator = reader.GetInt32(14), CountryVoteVersionId = reader.IsDBNull(15) ? (long?)null : reader.GetInt64(15) });
         return items;
     }
 

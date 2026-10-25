@@ -1,5 +1,7 @@
 using Meridian.Infrastructure.BackgroundJobs;
 using System.Data;
+using System.Text.Json;
+using Meridian.Infrastructure.Features.Snapshots.Contracts;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using NpgsqlTypes;
@@ -28,7 +30,8 @@ public sealed class RankingSnapshotJobProcessor(NpgsqlDataSource dataSource, Job
                 completed.Parameters.AddWithValue("id",job.SnapshotId);
                 if (await completed.ExecuteScalarAsync(cancellationToken) is true) return true;
             }
-            await MarkFailedAsync(job.SnapshotId, $"Snapshot calculation failed. Reference: {job.CorrelationId}", cancellationToken);
+            var message = exception is InvalidDataException ? exception.Message : $"Snapshot calculation failed. Reference: {job.CorrelationId}";
+            await MarkFailedAsync(job.SnapshotId, message, cancellationToken);
             await progressReporter.ReportAsync(job.SnapshotId,"Failed",0,null,cancellationToken,true);
         }
         return true;
@@ -40,7 +43,19 @@ public sealed class RankingSnapshotJobProcessor(NpgsqlDataSource dataSource, Job
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         Guid id;
         string correlation;
-        await using (var read = new NpgsqlCommand("SELECT j.id,COALESCE(j.payload->>'correlationId','') FROM background_jobs j JOIN ranking_snapshots s ON s.id=j.id WHERE j.job_type='ranking_snapshot' AND j.status='Queued' AND s.status='Queued' ORDER BY j.created_at FOR UPDATE OF j,s SKIP LOCKED LIMIT 1", connection, transaction))
+        await using (var read = new NpgsqlCommand("""
+            SELECT j.id,
+            COALESCE(j.payload->>'correlationId',
+            '')
+            FROM background_jobs j
+            JOIN ranking_snapshots s ON s.id=j.id
+            WHERE j.job_type='ranking_snapshot'
+            AND j.status='Queued'
+            AND s.status='Queued'
+            ORDER BY j.created_at FOR
+            UPDATE OF j,
+            s SKIP LOCKED LIMIT 1
+            """, connection, transaction))
         await using (var reader = await read.ExecuteReaderAsync(cancellationToken))
         {
             if (!await reader.ReadAsync(cancellationToken)) return null;
@@ -61,6 +76,63 @@ public sealed class RankingSnapshotJobProcessor(NpgsqlDataSource dataSource, Job
         return new ClaimedJob(id, correlation);
     }
 
+    // Selection, metadata, positions and ballots are read from one repeatable-read view.
+    // On an interrupted attempt the entire capture/calculation rolls back and is retried.
+    private static async Task CaptureInputsAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid id, CancellationToken ct)
+    {
+        SnapshotRequest request;
+        await using (var read = new NpgsqlCommand("SELECT selection FROM ranking_snapshots WHERE id=@id", connection, transaction))
+        {
+            read.Parameters.AddWithValue("id", id);
+            var json = (string)(await read.ExecuteScalarAsync(ct))!;
+            request = JsonSerializer.Deserialize<SnapshotRequest>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+        }
+        var filters = new List<string>();
+        if (request.Session.HasValue) filters.Add("vv.session=@session");
+        if (request.FromDate.HasValue) filters.Add("vv.vote_date>=@fromDate");
+        if (request.ToDate.HasValue) filters.Add("vv.vote_date<=@toDate");
+        if (request.VoteIds is { Count: > 0 }) filters.Add("v.assembly_vote_id=ANY(@ids)");
+        if (filters.Count == 0) throw new InvalidDataException("Snapshot selection is empty.");
+        await using (var clear = new NpgsqlCommand("DELETE FROM ranking_snapshot_votes WHERE snapshot_id=@id", connection, transaction))
+        {
+            clear.Parameters.AddWithValue("id", id);
+            await clear.ExecuteNonQueryAsync(ct);
+        }
+        var sql = """
+            INSERT INTO ranking_snapshot_votes(snapshot_id,ordinal,assembly_vote_id,vote_version_id,
+                position_version_id,vote_date,session,resolution_title,stance,weight)
+            SELECT @id,row_number() OVER (ORDER BY vv.vote_date,v.assembly_vote_id),v.assembly_vote_id,
+                vv.id,p.id,vv.vote_date,vv.session,vv.resolution_title,p.stance,p.weight
+            FROM votes v JOIN vote_versions vv ON vv.id=v.current_version_id
+            LEFT JOIN vote_positions vp ON vp.assembly_vote_id=v.assembly_vote_id
+            LEFT JOIN position_versions p ON p.id=vp.current_version_id
+            WHERE
+            """ + " " + string.Join(" AND ", filters);
+        // Validate again at capture time: the queued selection may have changed.
+        var validateSql = "SELECT v.assembly_vote_id FROM votes v JOIN vote_versions vv ON vv.id=v.current_version_id LEFT JOIN vote_positions vp ON vp.assembly_vote_id=v.assembly_vote_id WHERE " + string.Join(" AND ", filters) + " AND vp.current_version_id IS NULL ORDER BY v.assembly_vote_id LIMIT 50";
+        void Bind(NpgsqlCommand command)
+        {
+            if (request.Session.HasValue) command.Parameters.AddWithValue("session", request.Session.Value);
+            if (request.FromDate.HasValue) command.Parameters.AddWithValue("fromDate", request.FromDate.Value);
+            if (request.ToDate.HasValue) command.Parameters.AddWithValue("toDate", request.ToDate.Value);
+            if (request.VoteIds is { Count: > 0 }) command.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Text, request.VoteIds.ToArray());
+        }
+        await using (var validate = new NpgsqlCommand(validateSql, connection, transaction))
+        {
+            Bind(validate);
+            var missing = new List<string>();
+            await using (var reader = await validate.ExecuteReaderAsync(ct))
+                while (await reader.ReadAsync(ct)) missing.Add(reader.GetString(0));
+            if (missing.Count > 0) throw new InvalidDataException("Positions are missing at input capture: " + string.Join(", ", missing));
+        }
+        await using var capture = new NpgsqlCommand(sql, connection, transaction);
+        capture.CommandTimeout = 600;
+        capture.Parameters.AddWithValue("id", id);
+        Bind(capture);
+        if (await capture.ExecuteNonQueryAsync(ct) == 0)
+            throw new InvalidDataException("No approved votes match the selection at input capture.");
+    }
+
     private async Task CalculateAsync(Guid snapshotId, CancellationToken cancellationToken)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
@@ -76,6 +148,7 @@ public sealed class RankingSnapshotJobProcessor(NpgsqlDataSource dataSource, Job
             clearContributions.Parameters.AddWithValue("id", snapshotId);
             await clearContributions.ExecuteNonQueryAsync(cancellationToken);
         }
+        await CaptureInputsAsync(connection, transaction, snapshotId, cancellationToken);
         var voteIds = new List<string>();
         await using (var selected = new NpgsqlCommand("SELECT assembly_vote_id FROM ranking_snapshot_votes WHERE snapshot_id=@id ORDER BY ordinal", connection, transaction))
         {
@@ -97,7 +170,72 @@ public sealed class RankingSnapshotJobProcessor(NpgsqlDataSource dataSource, Job
         long rowsProcessed = 0;
         foreach (var batch in voteIds.Chunk(100))
         {
-            const string insertSql = "WITH base AS (SELECT sv.snapshot_id,sv.assembly_vote_id,sv.stance,sv.weight,sv.vote_date,ms.country_code,ms.country_name,EXISTS(SELECT 1 FROM membership_periods mp WHERE mp.country_code=ms.country_code AND mp.member_from<=sv.vote_date AND (mp.member_to IS NULL OR mp.member_to>=sv.vote_date)) AS member_at_vote,cv.current_version_id AS country_vote_version_id,cvv.ballot FROM ranking_snapshot_votes sv CROSS JOIN member_states ms LEFT JOIN country_votes cv ON cv.assembly_vote_id=sv.assembly_vote_id AND cv.country_code=ms.country_code LEFT JOIN country_vote_versions cvv ON cvv.id=cv.current_version_id WHERE sv.snapshot_id=@id AND sv.assembly_vote_id=ANY(@voteIds)) INSERT INTO ranking_snapshot_contributions(snapshot_id,country_code,country_name,assembly_vote_id,country_vote_version_id,ballot,member_at_vote,alignment_numerator,alignment_denominator,participation_numerator,participation_denominator,coverage_numerator,coverage_denominator) SELECT snapshot_id,country_code,country_name,assembly_vote_id,country_vote_version_id,ballot,member_at_vote,CASE WHEN member_at_vote AND ballot IN ('Y','N') AND ballot=stance THEN weight ELSE 0 END,CASE WHEN member_at_vote AND ballot IN ('Y','N') THEN weight ELSE 0 END,CASE WHEN member_at_vote AND ballot IN ('Y','N','A') THEN 1 ELSE 0 END,CASE WHEN member_at_vote AND ballot IN ('Y','N','A','X') THEN 1 ELSE 0 END,CASE WHEN member_at_vote AND ballot IS NOT NULL THEN 1 ELSE 0 END,CASE WHEN member_at_vote THEN 1 ELSE 0 END FROM base";
+            const string insertSql = """
+            WITH base AS (
+            SELECT sv.snapshot_id,
+            sv.assembly_vote_id,
+            sv.stance,
+            sv.weight,
+            sv.vote_date,
+            ms.country_code,
+            ms.country_name,
+            EXISTS(
+            SELECT 1
+            FROM membership_periods mp
+            WHERE mp.country_code=ms.country_code
+            AND mp.member_from<=sv.vote_date
+            AND (mp.member_to IS NULL
+            OR mp.member_to>=sv.vote_date)) AS member_at_vote,
+            cv.current_version_id AS country_vote_version_id,
+            cvv.ballot
+            FROM ranking_snapshot_votes sv
+            CROSS JOIN member_states ms
+            LEFT JOIN country_votes cv ON cv.assembly_vote_id=sv.assembly_vote_id
+            AND cv.country_code=ms.country_code
+            LEFT JOIN country_vote_versions cvv ON cvv.id=cv.current_version_id
+            WHERE sv.snapshot_id=@id
+            AND sv.assembly_vote_id=ANY(@voteIds))
+            INSERT INTO ranking_snapshot_contributions(snapshot_id,
+            country_code,
+            country_name,
+            assembly_vote_id,
+            country_vote_version_id,
+            ballot,
+            member_at_vote,
+            alignment_numerator,
+            alignment_denominator,
+            participation_numerator,
+            participation_denominator,
+            coverage_numerator,
+            coverage_denominator)
+            SELECT snapshot_id,
+            country_code,
+            country_name,
+            assembly_vote_id,
+            country_vote_version_id,
+            ballot,
+            member_at_vote,
+            CASE WHEN member_at_vote
+            AND ballot IN ('Y',
+            'N')
+            AND ballot=stance THEN weight ELSE 0 END,
+            CASE WHEN member_at_vote
+            AND ballot IN ('Y',
+            'N') THEN weight ELSE 0 END,
+            CASE WHEN member_at_vote
+            AND ballot IN ('Y',
+            'N',
+            'A') THEN 1 ELSE 0 END,
+            CASE WHEN member_at_vote
+            AND ballot IN ('Y',
+            'N',
+            'A',
+            'X') THEN 1 ELSE 0 END,
+            CASE WHEN member_at_vote
+            AND ballot IS NOT NULL THEN 1 ELSE 0 END,
+            CASE WHEN member_at_vote THEN 1 ELSE 0 END
+            FROM base
+            """;
             await using (var insert = new NpgsqlCommand(insertSql, connection, transaction))
             {
                 insert.CommandTimeout = 600;
@@ -107,7 +245,58 @@ public sealed class RankingSnapshotJobProcessor(NpgsqlDataSource dataSource, Job
             }
             await progressReporter.ReportAsync(snapshotId,"Calculating",rowsProcessed,countryCount * voteIds.Count,cancellationToken);
         }
-        const string resultsSql = "WITH totals AS (SELECT country_code,max(country_name) AS country_name,sum(alignment_numerator) AS alignment_numerator,sum(alignment_denominator) AS alignment_denominator,sum(participation_numerator) AS participating_ballots,sum(participation_denominator) AS approved_ballots,sum(coverage_numerator) AS approved_member_records,sum(coverage_denominator) AS eligible_member_votes FROM ranking_snapshot_contributions WHERE snapshot_id=@id GROUP BY country_code), scores AS (SELECT *,CASE WHEN alignment_denominator=0 THEN NULL ELSE 100.0*alignment_numerator/alignment_denominator END AS score,CASE WHEN approved_ballots=0 THEN NULL ELSE 100.0*participating_ballots/approved_ballots END AS participation,CASE WHEN eligible_member_votes=0 THEN NULL ELSE 100.0*approved_member_records/eligible_member_votes END AS coverage FROM totals), ranked AS (SELECT *,CASE WHEN score IS NULL THEN NULL ELSE rank() OVER (ORDER BY score DESC NULLS LAST)::integer END AS country_rank FROM scores) INSERT INTO ranking_snapshot_results(snapshot_id,country_code,country_name,rank,alignment_score,alignment_numerator,alignment_denominator,participation_percent,participating_ballots,approved_ballots,coverage_percent,approved_member_records,eligible_member_votes) SELECT @id,country_code,country_name,country_rank,score,alignment_numerator,alignment_denominator,participation,participating_ballots,approved_ballots,coverage,approved_member_records,eligible_member_votes FROM ranked";
+        const string resultsSql = """
+            WITH totals AS (
+            SELECT country_code,
+            max(country_name) AS country_name,
+            sum(alignment_numerator) AS alignment_numerator,
+            sum(alignment_denominator) AS alignment_denominator,
+            sum(participation_numerator) AS participating_ballots,
+            sum(participation_denominator) AS approved_ballots,
+            sum(coverage_numerator) AS approved_member_records,
+            sum(coverage_denominator) AS eligible_member_votes
+            FROM ranking_snapshot_contributions
+            WHERE snapshot_id=@id
+            GROUP BY country_code),
+            scores AS (
+            SELECT *,
+            CASE WHEN alignment_denominator=0 THEN NULL ELSE 100.0*alignment_numerator/alignment_denominator END AS score,
+            CASE WHEN approved_ballots=0 THEN NULL ELSE 100.0*participating_ballots/approved_ballots END AS participation,
+            CASE WHEN eligible_member_votes=0 THEN NULL ELSE 100.0*approved_member_records/eligible_member_votes END AS coverage
+            FROM totals),
+            ranked AS (
+            SELECT *,
+            CASE WHEN score IS NULL THEN NULL ELSE rank() OVER (
+            ORDER BY score DESC NULLS LAST)::integer END AS country_rank
+            FROM scores)
+            INSERT INTO ranking_snapshot_results(snapshot_id,
+            country_code,
+            country_name,
+            rank,
+            alignment_score,
+            alignment_numerator,
+            alignment_denominator,
+            participation_percent,
+            participating_ballots,
+            approved_ballots,
+            coverage_percent,
+            approved_member_records,
+            eligible_member_votes)
+            SELECT @id,
+            country_code,
+            country_name,
+            country_rank,
+            score,
+            alignment_numerator,
+            alignment_denominator,
+            participation,
+            participating_ballots,
+            approved_ballots,
+            coverage,
+            approved_member_records,
+            eligible_member_votes
+            FROM ranked
+            """;
         await using (var results = new NpgsqlCommand(resultsSql, connection, transaction))
         {
             results.CommandTimeout = 600;
